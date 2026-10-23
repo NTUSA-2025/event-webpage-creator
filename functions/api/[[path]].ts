@@ -27,7 +27,7 @@ import {
   saveRevision,
   shareToken,
 } from '../_lib/storage';
-import { getChrome, syncChrome } from '../_lib/chrome';
+import { fetchLiveChrome, liveChromeImage } from '../_lib/chrome';
 import { exportHtml, mediaResponse, previewHtml, validateSource } from '../_lib/media';
 import { generateHtml, llmSettings, validateLlmUrl } from '../_lib/llm';
 
@@ -66,7 +66,9 @@ async function route(request: Request, env: Env, parts: string[]): Promise<Respo
     return json({ ok: true }, 200, { 'Set-Cookie': cookie('session', '', env, 0) });
   }
   if (method === 'GET' && parts[0] === 'chrome' && parts.length === 1)
-    return json({ chrome: await getChrome(env) });
+    return json({ chrome: await fetchLiveChrome() });
+  if (method === 'GET' && parts[0] === 'chrome' && parts[1] === 'image')
+    return liveChromeImage(url.searchParams.get('src'));
   if (method === 'GET' && parts[0] === 'media' && parts[1]) return mediaResponse(env, parts[1]);
   if (method === 'GET' && parts[0] === 'view' && parts[1] && parts.length === 2) {
     const project = await publicProject(env, parts[1]);
@@ -104,7 +106,6 @@ async function route(request: Request, env: Env, parts: string[]): Promise<Respo
       return json({
         llm: await llmSettings(env),
         rules: rules.results || [],
-        chrome: await getChrome(env),
       });
     }
     if (method === 'PUT' && parts[1] === 'llm') {
@@ -149,8 +150,6 @@ async function route(request: Request, env: Env, parts: string[]): Promise<Respo
       await env.DB.prepare('DELETE FROM creator_rules WHERE id = ?').bind(parts[2]).run();
       return json({ ok: true });
     }
-    if (method === 'POST' && parts[1] === 'chrome' && parts[2] === 'sync')
-      return json({ chrome: await syncChrome(env) });
     throw new HttpError(404, '找不到管理功能');
   }
 

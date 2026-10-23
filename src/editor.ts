@@ -65,12 +65,83 @@ const bridge = `
 })();
 `;
 
-export function iframeDocument(html: string, editMode: boolean): string {
+function chromeBridge(snapshot: ChromeSnapshot, initialLocale: 'zh' | 'en'): string {
+  const payload = JSON.stringify(snapshot).replace(/</g, '\\u003c');
+  return `
+(() => {
+  const snapshot = ${payload};
+  let locale = ${JSON.stringify(initialLocale)};
+  const headerHost = document.querySelector('[data-official-chrome="header"]');
+  const footerHost = document.querySelector('[data-official-chrome="footer"]');
+  const headerRoot = headerHost.attachShadow({ mode: 'open' });
+  const footerRoot = footerHost.attachShadow({ mode: 'open' });
+  const spacer = document.querySelector('[data-official-chrome-spacer]');
+  const updateScrolled = () => {
+    headerRoot.querySelector('.navbar')?.classList.toggle('scrolled', scrollY > 8);
+  };
+  const render = () => {
+    headerRoot.innerHTML = '<style>' + snapshot.css + '</style><div data-live-body></div>';
+    footerRoot.innerHTML = '<style>' + snapshot.css + '</style><div data-live-body></div>';
+    const headerBody = headerRoot.querySelector('[data-live-body]');
+    const footerBody = footerRoot.querySelector('[data-live-body]');
+    headerBody.className = snapshot.bodyClass;
+    footerBody.className = snapshot.bodyClass;
+    headerBody.innerHTML = snapshot[locale].header;
+    footerBody.innerHTML = snapshot[locale].footer;
+    spacer.style.height = headerRoot.querySelector('.navbar').getBoundingClientRect().height + 'px';
+    updateScrolled();
+  };
+  addEventListener('scroll', updateScrolled, { passive: true });
+  headerRoot.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const button = target.closest('.locale-switcher__option');
+    if (button) {
+      const next = button.textContent.trim() === 'EN' ? 'en' : 'zh';
+      if (next !== locale) {
+        locale = next;
+        render();
+        parent.postMessage({ channel: 'event-page-chrome', locale }, '*');
+      }
+      return;
+    }
+    if (target.closest('.hamburger')) {
+      headerRoot.querySelector('.drawer')?.classList.add('open');
+      headerRoot.querySelector('.drawer-overlay')?.classList.add('open');
+    } else if (target.closest('.drawer-close, .drawer-overlay, .drawer-link')) {
+      headerRoot.querySelector('.drawer')?.classList.remove('open');
+      headerRoot.querySelector('.drawer-overlay')?.classList.remove('open');
+    }
+  });
+  render();
+})();`;
+}
+
+export function iframeDocument(
+  html: string,
+  editMode: boolean,
+  chrome: ChromeSnapshot | null = null,
+  locale: 'zh' | 'en' = 'zh',
+): string {
   const document = new DOMParser().parseFromString(html, 'text/html');
   const csp = document.createElement('meta');
   csp.httpEquiv = 'Content-Security-Policy';
   csp.content = `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src ${window.location.origin} https: data:; frame-src https:; form-action https:; connect-src 'none'; base-uri 'none'`;
   document.head.insertBefore(csp, document.head.firstChild);
+  if (chrome) {
+    const header = document.createElement('div');
+    header.dataset.officialChrome = 'header';
+    const footer = document.createElement('div');
+    footer.dataset.officialChrome = 'footer';
+    const spacer = document.createElement('div');
+    spacer.dataset.officialChromeSpacer = '';
+    document.body.insertBefore(header, document.body.firstChild);
+    document.body.insertBefore(spacer, header.nextSibling);
+    document.body.appendChild(footer);
+    const script = document.createElement('script');
+    script.textContent = chromeBridge(chrome, locale);
+    document.body.appendChild(script);
+  }
   if (editMode) {
     const script = document.createElement('script');
     script.textContent = bridge;
@@ -104,3 +175,4 @@ export function patchElement(
   if (patch.height !== undefined) element.style.height = patch.height;
   return `<!doctype html>\n${document.documentElement.outerHTML}`;
 }
+import type { ChromeSnapshot } from './api';

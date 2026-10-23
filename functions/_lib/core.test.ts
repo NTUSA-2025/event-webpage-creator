@@ -9,7 +9,7 @@ import {
   revisionHtml,
   saveRevision,
 } from './storage';
-import { syncChrome } from './chrome';
+import { fetchLiveChrome } from './chrome';
 import { startGoogle } from './auth';
 import { generateHtml } from './llm';
 import { onRequest } from '../api/[[path]]';
@@ -311,13 +311,10 @@ describe('visual editing', () => {
   });
 });
 
-describe('official chrome synchronization', () => {
+describe('live official chrome', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('keeps the previous snapshot when the official page structure changes', async () => {
-    const put = vi.fn();
-    const prepare = vi.fn();
-    const env = { FILES: { put }, DB: { prepare } } as unknown as Env;
+  it('rejects a changed official page structure', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(
@@ -328,36 +325,57 @@ describe('official chrome synchronization', () => {
           ),
       ),
     );
-    await expect(syncChrome(env)).rejects.toThrow(/官網缺少/);
-    expect(put).not.toHaveBeenCalled();
-    expect(prepare).not.toHaveBeenCalled();
+    await expect(fetchLiveChrome()).rejects.toThrow(/官網缺少/);
   });
 
-  it('rewrites official links and switches to a complete bilingual snapshot', async () => {
+  it('fetches fresh bilingual nav/footer and rewrites official links', async () => {
     const body =
-      '<html><head><link rel="stylesheet" href="/_next/site.css"></head><body><header class="navbar"><a href="/about">About</a></header><div class="drawer-overlay"></div><aside class="drawer"><a href="/forms">Forms</a></aside><footer class="footer"><a href="/api/auth/signin">Admin sign in</a><a href="/data">Data</a></footer></body></html>';
-    const put = vi.fn(async () => undefined);
-    const run = vi.fn(async () => ({}));
-    const bind = vi.fn(() => ({ run }));
-    const env = { FILES: { put }, DB: { prepare: vi.fn(() => ({ bind })) } } as unknown as Env;
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        async (input: string | URL | Request, init?: RequestInit) =>
-          new Response(
-            String(input).endsWith('.css')
-              ? ':root{--brand:#fff}.navbar{color:red}.footer{color:blue}'
-              : (init?.headers as Record<string, string>)?.Cookie === 'NEXT_LOCALE=zh-TW'
-                ? body.replace('About', '關於')
-                : body,
-          ),
-      ),
+      '<html><head><link rel="stylesheet" href="/_next/site.css"></head><body><header class="navbar"><img src="/_next/image?url=%2FNTUSA_Logo_1.png&amp;w=96" srcset="/_next/image?url=%2FNTUSA_Logo_1.png&amp;w=48 1x"><a href="/about">About</a></header><div class="drawer-overlay"></div><aside class="drawer"><a href="/forms">Forms</a></aside><footer class="footer"><a href="/api/auth/signin">Admin sign in</a><a href="/data">Data</a></footer></body></html>';
+    const fetchMock = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) =>
+        new Response(
+          String(input).endsWith('.css')
+            ? ':root{--brand:#fff}.navbar{color:red}.footer{color:blue}body{font-family:Inter;line-height:1.7}'
+            : (init?.headers as Record<string, string>)?.Cookie === 'NEXT_LOCALE=zh-TW'
+              ? body.replace('About', '關於')
+              : body,
+        ),
     );
-    const result = await syncChrome(env);
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await fetchLiveChrome();
     expect(result.zh.header).toContain('https://ntusa.ntu.edu.tw/about');
-    expect(result.en.footer).not.toContain('/api/auth/signin');
+    expect(result.en.header).toContain('/api/chrome/image?src=');
+    expect(result.en.footer).toContain('https://ntusa.ntu.edu.tw/api/auth/signin');
     expect(result.css).toContain(':host{--brand');
-    expect(put).toHaveBeenCalledOnce();
-    expect(run).toHaveBeenCalledOnce();
+    const dom = new JSDOM('', { url: 'https://studio.example.org' });
+    vi.stubGlobal('DOMParser', dom.window.DOMParser);
+    vi.stubGlobal('window', dom.window);
+    expect(
+      iframeDocument('<!doctype html><html><body><h1>活動</h1></body></html>', false, result),
+    ).toContain('data-official-chrome="header"');
+    await fetchLiveChrome();
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it('proxies only images from the official site', async () => {
+    const fetchMock = vi.fn(
+      async (_input: URL) =>
+        new Response(new Uint8Array([137, 80, 78, 71]), {
+          headers: { 'Content-Type': 'image/png' },
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const request = (src: string) =>
+      onRequest({
+        request: new Request(
+          `https://studio.example.org/api/chrome/image?src=${encodeURIComponent(src)}`,
+        ),
+        env: {} as Env,
+        params: { path: ['chrome', 'image'] },
+      } as never);
+    expect((await request('/NTUSA_Logo_1.png')).status).toBe(200);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe('https://ntusa.ntu.edu.tw/NTUSA_Logo_1.png');
+    expect((await request('//other.example/logo.png')).status).toBe(400);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

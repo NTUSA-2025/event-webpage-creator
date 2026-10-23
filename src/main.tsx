@@ -35,7 +35,7 @@ import {
   type Revision,
   type User,
 } from './api';
-import { ChromeSlot, loadChrome, setChromeCache } from './chrome';
+import { loadChrome } from './chrome';
 import { iframeDocument, patchElement, type EditorMessage } from './editor';
 import './styles.css';
 
@@ -58,7 +58,6 @@ function formatDate(value: string): string {
 function App() {
   const [path, setPath] = useState(route);
   const [user, setUser] = useState<User | null>(null);
-  const [chrome, setChrome] = useState<ChromeSnapshot | null>(null);
   const [locale, setLocale] = useState<'zh' | 'en'>(() =>
     localStorage.getItem('locale') === 'en' ? 'en' : 'zh',
   );
@@ -92,11 +91,10 @@ function App() {
     };
     window.addEventListener('hashchange', onHash);
     window.addEventListener('beforeunload', onBeforeUnload);
-    Promise.allSettled([api<{ user: User }>('me'), loadChrome()]).then(([me, common]) => {
-      if (me.status === 'fulfilled') setUser(me.value.user);
-      if (common.status === 'fulfilled') setChrome(common.value);
-      setLoading(false);
-    });
+    api<{ user: User }>('me')
+      .then((result) => setUser(result.user))
+      .catch(() => undefined)
+      .finally(() => setLoading(false));
     return () => {
       window.removeEventListener('hashchange', onHash);
       window.removeEventListener('beforeunload', onBeforeUnload);
@@ -123,7 +121,6 @@ function App() {
 
   return (
     <div className="app-shell">
-      <ChromeSlot kind="header" snapshot={chrome} locale={locale} onLocale={changeLocale} />
       <div className="utility-bar">
         <a href="#/dashboard" className="utility-brand">
           <span className="utility-dot" /> 活動網頁設計台{' '}
@@ -169,16 +166,28 @@ function App() {
             <LoaderCircle className="spin" /> 載入中
           </div>
         ) : path[0] === 'view' && viewToken ? (
-          <ShareView key={viewToken} token={viewToken} user={user} />
+          <ShareView
+            key={viewToken}
+            token={viewToken}
+            user={user}
+            locale={locale}
+            onLocale={changeLocale}
+          />
         ) : path[0] === 'edit' && path[1] ? (
           user?.canCreate ? (
-            <Editor key={path[1]} id={path[1]} onDirtyChange={onEditorDirtyChange} />
+            <Editor
+              key={path[1]}
+              id={path[1]}
+              onDirtyChange={onEditorDirtyChange}
+              locale={locale}
+              onLocale={changeLocale}
+            />
           ) : (
             <AccessPage user={user} />
           )
         ) : path[0] === 'admin' ? (
           user?.isAdmin ? (
-            <AdminPanel onChrome={setChrome} />
+            <AdminPanel />
           ) : (
             <AccessPage user={user} />
           )
@@ -188,7 +197,6 @@ function App() {
           <AccessPage user={user} />
         )}
       </main>
-      <ChromeSlot kind="footer" snapshot={chrome} locale={locale} onLocale={changeLocale} />
     </div>
   );
 }
@@ -345,10 +353,22 @@ type ProjectDetail = {
   chat: ChatMessage[];
 };
 
-function Editor({ id, onDirtyChange }: { id: string; onDirtyChange: (dirty: boolean) => void }) {
+function Editor({
+  id,
+  onDirtyChange,
+  locale,
+  onLocale,
+}: {
+  id: string;
+  onDirtyChange: (dirty: boolean) => void;
+  locale: 'zh' | 'en';
+  onLocale: (locale: 'zh' | 'en') => void;
+}) {
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   const [source, setSource] = useState('');
   const [rendered, setRendered] = useState('');
+  const [chrome, setChrome] = useState<ChromeSnapshot | null>(null);
+  const [chromeError, setChromeError] = useState('');
   const [prompt, setPrompt] = useState('');
   const [mediaInput, setMediaInput] = useState('');
   const [selected, setSelected] = useState<EditorMessage | null>(null);
@@ -408,6 +428,11 @@ function Editor({ id, onDirtyChange }: { id: string; onDirtyChange: (dirty: bool
     reload().catch((e) => setError(err(e)));
   }, [reload]);
   useEffect(() => {
+    loadChrome()
+      .then(setChrome)
+      .catch((e) => setChromeError(`官網導覽列與頁尾載入失敗：${err(e)}`));
+  }, []);
+  useEffect(() => {
     if (!detail || source === detail.html) return;
     const timer = window.setTimeout(() => {
       api<{ previewHtml: string }>(`projects/${id}/preview`, {
@@ -422,13 +447,16 @@ function Editor({ id, onDirtyChange }: { id: string; onDirtyChange: (dirty: bool
     return () => clearTimeout(timer);
   }, [source, detail, id]);
   useEffect(() => {
-    const onMessage = (event: MessageEvent<EditorMessage>) => {
-      if (
-        event.source !== frame.current?.contentWindow ||
-        event.data?.channel !== 'event-page-editor'
-      )
-        return;
+    const onMessage = (
+      event: MessageEvent<EditorMessage | { channel: 'event-page-chrome'; locale: 'zh' | 'en' }>,
+    ) => {
+      if (event.source !== frame.current?.contentWindow) return;
       const message = event.data;
+      if (message?.channel === 'event-page-chrome') {
+        if (message.locale === 'zh' || message.locale === 'en') onLocale(message.locale);
+        return;
+      }
+      if (message?.channel !== 'event-page-editor') return;
       if (!message.id || message.id.length > 200) return;
       if (message.type === 'select') setSelected(message);
       if (message.type === 'text' && message.leaf === true && typeof message.text === 'string') {
@@ -466,7 +494,7 @@ function Editor({ id, onDirtyChange }: { id: string; onDirtyChange: (dirty: bool
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, []);
+  }, [onLocale]);
 
   const save = async (html = source): Promise<string> => {
     if (!detail) throw new Error('尚未載入專案');
@@ -602,7 +630,10 @@ function Editor({ id, onDirtyChange }: { id: string; onDirtyChange: (dirty: bool
     document.getElementById(section)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  const previewDocument = useMemo(() => iframeDocument(rendered, editMode), [rendered, editMode]);
+  const previewDocument = useMemo(
+    () => iframeDocument(rendered, editMode, chrome, locale),
+    [rendered, editMode, chrome, locale],
+  );
   if (!detail)
     return (
       <div className="loading-screen">
@@ -654,6 +685,12 @@ function Editor({ id, onDirtyChange }: { id: string; onDirtyChange: (dirty: bool
         <div className="editor-alert success-message" role="status">
           <Check size={16} /> {notice}
           <button onClick={() => setNotice('')}>✕</button>
+        </div>
+      )}
+      {chromeError && (
+        <div className="editor-alert error-message" role="alert">
+          {chromeError}
+          <button onClick={() => setChromeError('')}>✕</button>
         </div>
       )}
       <nav className="editor-section-nav" aria-label="編輯區段">
@@ -948,15 +985,45 @@ function Editor({ id, onDirtyChange }: { id: string; onDirtyChange: (dirty: bool
   );
 }
 
-function ShareView({ token, user }: { token: string; user: User | null }) {
+function ShareView({
+  token,
+  user,
+  locale,
+  onLocale,
+}: {
+  token: string;
+  user: User | null;
+  locale: 'zh' | 'en';
+  onLocale: (locale: 'zh' | 'en') => void;
+}) {
   const [data, setData] = useState<{ title: string; html: string; updatedAt: string } | null>(null);
   const [error, setError] = useState('');
+  const [chrome, setChrome] = useState<ChromeSnapshot | null>(null);
+  const [chromeError, setChromeError] = useState('');
+  const frame = useRef<HTMLIFrameElement>(null);
   useEffect(() => {
     api<{ title: string; html: string; updatedAt: string }>(`view/${token}`)
       .then(setData)
       .catch((e) => setError(err(e)));
   }, [token]);
-  const shareDocument = useMemo(() => iframeDocument(data?.html || '', false), [data?.html]);
+  useEffect(() => {
+    loadChrome()
+      .then(setChrome)
+      .catch((e) => setChromeError(`官網導覽列與頁尾載入失敗：${err(e)}`));
+  }, []);
+  useEffect(() => {
+    const onMessage = (event: MessageEvent<{ channel: string; locale?: 'zh' | 'en' }>) => {
+      if (event.source !== frame.current?.contentWindow) return;
+      if (event.data?.channel === 'event-page-chrome' && event.data.locale)
+        onLocale(event.data.locale);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [onLocale]);
+  const shareDocument = useMemo(
+    () => iframeDocument(data?.html || '', false, chrome, locale),
+    [data?.html, chrome, locale],
+  );
   return (
     <div className="share-view">
       <div className="share-banner">
@@ -983,10 +1050,12 @@ function ShareView({ token, user }: { token: string; user: User | null }) {
           </div>
         )}
       </div>
+      {chromeError && <div className="share-error">{chromeError}</div>}
       {error ? (
         <div className="share-error">{error}</div>
       ) : data ? (
         <iframe
+          ref={frame}
           className="share-frame"
           sandbox="allow-scripts allow-forms"
           title={data.title}
@@ -1002,21 +1071,19 @@ function ShareView({ token, user }: { token: string; user: User | null }) {
 }
 
 type Rule = { id: string; kind: 'email' | 'domain' | 'group'; value: string };
-function AdminPanel({ onChrome }: { onChrome: (snapshot: ChromeSnapshot) => void }) {
+function AdminPanel() {
   const [llm, setLlm] = useState({ baseUrl: '', model: '' });
   const [rules, setRules] = useState<Rule[]>([]);
-  const [chrome, setChrome] = useState<ChromeSnapshot | null>(null);
   const [kind, setKind] = useState<Rule['kind']>('email');
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   useEffect(() => {
-    api<{ llm: typeof llm; rules: Rule[]; chrome: ChromeSnapshot | null }>('admin')
+    api<{ llm: typeof llm; rules: Rule[] }>('admin')
       .then((r) => {
         setLlm(r.llm);
         setRules(r.rules);
-        setChrome(r.chrome);
       })
       .catch((e) => setError(err(e)));
   }, []);
@@ -1060,21 +1127,6 @@ function AdminPanel({ onChrome }: { onChrome: (snapshot: ChromeSnapshot) => void
       setError(err(e));
     }
   };
-  const sync = async () => {
-    setBusy('chrome');
-    setError('');
-    try {
-      const result = await api<{ chrome: ChromeSnapshot }>('admin/chrome/sync', { method: 'POST' });
-      setChrome(result.chrome);
-      setChromeCache(result.chrome);
-      onChrome(result.chrome);
-      setNotice('已從官網同步中英文導覽列與頁尾。');
-    } catch (e) {
-      setError(err(e));
-    } finally {
-      setBusy('');
-    }
-  };
   return (
     <div className="admin-page page-wrap">
       <button className="back-link" onClick={() => go('dashboard')}>
@@ -1083,7 +1135,7 @@ function AdminPanel({ onChrome }: { onChrome: (snapshot: ChromeSnapshot) => void
       <div className="admin-header">
         <span className="eyebrow">CONTROL ROOM</span>
         <h1>管理平台設定</h1>
-        <p>設定生成模型與建立資格；共用版位可從官網即時同步。</p>
+        <p>設定生成模型與建立資格；活動預覽會直接讀取官網的導覽列與頁尾。</p>
       </div>
       {error && <p className="error-message">{error}</p>}
       {notice && <p className="success-message">{notice}</p>}
@@ -1162,30 +1214,6 @@ function AdminPanel({ onChrome }: { onChrome: (snapshot: ChromeSnapshot) => void
               <div className="rule-empty">尚無規則，只有管理員可建立活動。</div>
             )}
           </div>
-        </section>
-        <section className="admin-card chrome-card">
-          <div className="admin-card-icon">
-            <Link2 size={21} />
-          </div>
-          <h2>官網共用元件</h2>
-          <p>
-            從 ntusa.ntu.edu.tw
-            擷取中英文公開導覽列、手機選單與頁尾。通過結構檢查後會立即套用到平台與所有分享頁。
-          </p>
-          <div className="sync-status">
-            <span className="status-dot" />{' '}
-            {chrome
-              ? `上次同步：${formatDate(chrome.syncedAt)}`
-              : '使用內建官網版位；尚未執行首次同步'}
-          </div>
-          <button className="primary-button" disabled={!!busy} onClick={sync}>
-            {busy === 'chrome' ? (
-              <LoaderCircle className="spin" size={16} />
-            ) : (
-              <RotateCcw size={16} />
-            )}{' '}
-            更新共用元件
-          </button>
         </section>
       </div>
     </div>

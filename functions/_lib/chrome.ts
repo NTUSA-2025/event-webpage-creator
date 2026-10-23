@@ -1,12 +1,12 @@
 import * as cheerio from 'cheerio';
-import type { Env } from './types';
 import { HttpError } from './http';
 
 const officialOrigin = 'https://ntusa.ntu.edu.tw';
 
 export interface ChromeSnapshot {
-  syncedAt: string;
+  fetchedAt: string;
   css: string;
+  bodyClass: string;
   zh: { header: string; footer: string };
   en: { header: string; footer: string };
 }
@@ -19,30 +19,42 @@ function absolute(value: string, base = officialOrigin): string {
   }
 }
 
+function previewImage(value: string): string {
+  const url = new URL(value, officialOrigin);
+  if (url.origin !== officialOrigin) return url.toString();
+  return `/api/chrome/image?src=${encodeURIComponent(url.pathname + url.search)}`;
+}
+
 function normalizeFragment($: cheerio.CheerioAPI, selector: string): string {
   const elements = $(selector);
   if (!elements.length) throw new HttpError(502, `官網缺少 ${selector}，未套用更新`);
   elements.find('script, style, link, iframe').remove();
-  elements.find('a[href*="/api/auth/signin"], .nav-admin-menu').remove();
   elements.add(elements.find('*')).each((_, element) => {
     if (!('attribs' in element)) return;
     const node = $(element);
     for (const [key, value] of Object.entries(element.attribs)) {
       if (/^on/i.test(key) || key === 'srcdoc') node.removeAttr(key);
       else if (['href', 'src'].includes(key) && value) {
-        const resolved =
-          key === 'src' && decodeURIComponent(value).includes('NTUSA_Logo_1.png')
-            ? '/NTUSA_Logo_1.png'
-            : absolute(value);
+        const resolved = key === 'src' && node.is('img') ? previewImage(value) : absolute(value);
         if (
           !/^https:\/\//.test(resolved) &&
           !/^mailto:/.test(resolved) &&
-          resolved !== '/NTUSA_Logo_1.png'
+          !resolved.startsWith('/api/chrome/image?')
         )
           node.removeAttr(key);
         else node.attr(key, resolved);
       } else if (key.toLowerCase() === 'srcset') {
-        node.removeAttr(key); // The absolute src is enough; Next's relative srcset is invalid here.
+        const sources = value.split(',').map((source) => {
+          const [url, descriptor] = source.trim().split(/\s+/, 2);
+          return `${previewImage(url)}${descriptor ? ` ${descriptor}` : ''}`;
+        });
+        if (
+          sources.every(
+            (source) => source.startsWith('https://') || source.startsWith('/api/chrome/image?'),
+          )
+        )
+          node.attr(key, sources.join(', '));
+        else node.removeAttr(key);
       }
     }
   });
@@ -61,10 +73,13 @@ async function fetchLocale(locale: 'zh-TW' | 'en') {
   const html = await response.text();
   if (html.length > 2_000_000) throw new HttpError(502, '官網頁面過大，未套用更新');
   const $ = cheerio.load(html);
+  const bodyClass = $('body').attr('class') || '';
+  if (!/^[A-Za-z0-9_\- ]{0,300}$/.test(bodyClass)) throw new HttpError(502, '官網字型設定格式錯誤');
   const cssUrl = $('link[rel="stylesheet"]').first().attr('href');
   if (!cssUrl) throw new HttpError(502, '官網樣式檔未找到，未套用更新');
   return {
     cssUrl: absolute(cssUrl),
+    bodyClass,
     header:
       normalizeFragment($, 'header.navbar') +
       normalizeFragment($, '.drawer-overlay') +
@@ -73,7 +88,7 @@ async function fetchLocale(locale: 'zh-TW' | 'en') {
   };
 }
 
-export async function syncChrome(env: Env): Promise<ChromeSnapshot> {
+export async function fetchLiveChrome(): Promise<ChromeSnapshot> {
   const [zh, en] = await Promise.all([fetchLocale('zh-TW'), fetchLocale('en')]);
   if (zh.header === en.header && zh.footer === en.footer)
     throw new HttpError(502, '官網未回傳獨立中英文版位，未套用更新');
@@ -88,30 +103,37 @@ export async function syncChrome(env: Env): Promise<ChromeSnapshot> {
       /url\((['"]?)([^)'" ]+)\1\)/g,
       (_match, _quote: string, path: string) => `url("${absolute(path, zh.cssUrl)}")`,
     );
+  const bodyRules = [...css.matchAll(/(?:^|})body\{([^}]*)\}/g)].map((match) => match[1]);
+  const bodyStyle = bodyRules.reverse().find((rule) => rule.includes('font-family:'));
+  if (!bodyStyle) throw new HttpError(502, '官網基本樣式未找到，未套用更新');
+  css += `:host{${bodyStyle}}`;
   const snapshot: ChromeSnapshot = {
-    syncedAt: new Date().toISOString(),
+    fetchedAt: new Date().toISOString(),
     css,
+    bodyClass: zh.bodyClass,
     zh: { header: zh.header, footer: zh.footer },
     en: { header: en.header, footer: en.footer },
   };
-  const key = `chrome/${crypto.randomUUID()}.json`;
-  await env.FILES.put(key, JSON.stringify(snapshot), {
-    httpMetadata: { contentType: 'application/json' },
-  });
-  await env.DB.prepare(
-    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP',
-  )
-    .bind('chrome_key', key)
-    .run();
   return snapshot;
 }
 
-export async function getChrome(env: Env): Promise<ChromeSnapshot | null> {
-  const row = await env.DB.prepare('SELECT value FROM settings WHERE key = ?')
-    .bind('chrome_key')
-    .first<{ value: string }>();
-  if (!row) return null;
-  const object = await env.FILES.get(row.value);
-  if (!object) return null;
-  return object.json<ChromeSnapshot>();
+export async function liveChromeImage(value: string | null): Promise<Response> {
+  if (!value || value.length > 500 || !value.startsWith('/') || value.startsWith('//'))
+    throw new HttpError(400, '官網圖片路徑錯誤');
+  const url = new URL(value, officialOrigin);
+  if (url.origin !== officialOrigin) throw new HttpError(400, '官網圖片路徑錯誤');
+  const response = await fetch(url, { redirect: 'manual' });
+  if (!response.ok) throw new HttpError(502, '官網圖片無法讀取');
+  const mime = response.headers.get('Content-Type')?.split(';')[0] || '';
+  if (!/^image\/(png|jpeg|webp|gif|svg\+xml)$/.test(mime))
+    throw new HttpError(502, '官網圖片格式錯誤');
+  const bytes = await response.arrayBuffer();
+  if (bytes.byteLength > 2_000_000) throw new HttpError(502, '官網圖片過大');
+  return new Response(bytes, {
+    headers: {
+      'Content-Type': mime,
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
 }

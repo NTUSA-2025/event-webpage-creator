@@ -33,8 +33,9 @@ export interface ChatMessage {
 }
 
 export interface ChromeSnapshot {
-  syncedAt: string;
+  fetchedAt: string;
   css: string;
+  bodyClass: string;
   zh: { header: string; footer: string };
   en: { header: string; footer: string };
 }
