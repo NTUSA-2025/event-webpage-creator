@@ -1,3 +1,5 @@
+# 本機使用：複製為 .dev.vars，Wrangler Pages Functions 會自動讀取。
+# DB 與 FILES 是 D1 / R2 binding，須另外設定，不是此檔的文字變數。
 GOOGLE_CLIENT_ID=""
 GOOGLE_CLIENT_SECRET=""
 GOOGLE_SERVICE_ACCOUNT_EMAIL=""

@@ -21,6 +21,18 @@
 7. 啟用 Google Drive API，建立受 API 範圍限制的 key。素材須是 Drive 的 PNG、JPEG、WebP 或 GIF，設為「知道連結的任何人可檢視」，單檔不超過 8 MB；若連結含 resource key，平台會帶入 Drive API 請求。[Drive 公開檔案憑證](https://developers.google.com/workspace/guides/create-credentials)、[resource key](https://developers.google.com/workspace/drive/api/guides/resource-keys)。
 8. 第一次以管理員群組帳號登入後，在後台設定 LLM HTTPS base URL 與支援圖片輸入的模型。`LLM_API_KEY` 保持在 Cloudflare secret；平台以相容 OpenAI Chat Completions 的 `POST /chat/completions` 呼叫模型。管理員也可加入建立者信箱、網域或 Google Group，並按「更新共用元件」從官網同步中英文公開 nav/footer。
 
+## 本機環境變數
+
+將 `.dev.vars.example` 複製為 `.dev.vars`，填入本機測試用的憑證，並讓 `PUBLIC_ORIGIN` 與本機 Pages Functions 網址一致（範例為 `http://localhost:8788`）。`wrangler pages dev` 會自動讀取 `.dev.vars`；`vite preview` 只提供靜態前端，不會啟動 Functions。`.dev.vars` 已列入 `.gitignore`，請勿提交真實密鑰。[Cloudflare Pages 本機變數說明](https://developers.cloudflare.com/pages/functions/bindings/#interact-with-your-environment-variables-locally)。
+
+```bash
+cp .dev.vars.example .dev.vars
+npm run build
+npx wrangler pages dev dist --d1 DB=YOUR_D1_DATABASE_ID --r2 FILES --compatibility-date 2026-10-01 --compatibility-flags nodejs_compat --port 8788
+```
+
+本機 D1 仍須套用 `migrations/0001_init.sql`；D1、R2 binding 與 `.dev.vars` 是分開設定的。`YOUR_D1_DATABASE_ID` 請換成測試用資料庫 ID。[Cloudflare Pages D1 本機 binding](https://developers.cloudflare.com/pages/functions/bindings/#interact-with-your-d1-databases-locally)。
+
 ## 驗證與限制
 
 本地靜態檢查：`npm run build`、`npm test`。Pages Functions 可用 `npx wrangler pages functions build --compatibility-flags nodejs_compat` 檢查打包；不需要啟動開發伺服器。正式 OAuth、D1、R2、Drive、Google Groups 和 LLM 串接需在完成上述綁定後驗收。
