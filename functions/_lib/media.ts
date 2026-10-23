@@ -83,6 +83,12 @@ export function driveLinks(html: string): DriveRef[] {
   ];
 }
 
+export function exportHtml(source: string): string {
+  const links = driveLinks(source);
+  const comment = `<!--\n工程整合提醒：此檔僅為活動頁設計稿。正式納入官網前，請審查 HTML/CSS/JS，下載下列 Google Drive 素材作為官網 asset，並替換連結。\n${links.map((item) => item.original).join('\n')}\n-->\n`;
+  return source.replace(/<!doctype html>/i, (doctype) => `${doctype}\n${comment}`);
+}
+
 export function validateSource(html: string): void {
   if (html.length > 1_000_000 || !/<!doctype html>/i.test(html) || !/<html[\s>]/i.test(html))
     throw new HttpError(400, '請提供小於 1 MB 的完整 HTML 文件');

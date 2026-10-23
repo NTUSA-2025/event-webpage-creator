@@ -28,7 +28,7 @@ import {
   shareToken,
 } from '../_lib/storage';
 import { getChrome, syncChrome } from '../_lib/chrome';
-import { driveLinks, mediaResponse, previewHtml, validateSource } from '../_lib/media';
+import { exportHtml, mediaResponse, previewHtml, validateSource } from '../_lib/media';
 import { generateHtml, llmSettings, validateLlmUrl } from '../_lib/llm';
 
 function projectSummary(project: ProjectRow, token?: string) {
@@ -81,9 +81,7 @@ async function route(request: Request, env: Env, parts: string[]): Promise<Respo
     requireEngineer(user);
     const project = await publicProject(env, parts[1]);
     const source = await revisionHtml(env, project.shared_revision_id!);
-    const links = driveLinks(source);
-    const comment = `<!--\n工程整合提醒：此檔僅為活動頁設計稿。正式納入官網前，請審查 HTML/CSS/JS，下載下列 Google Drive 素材作為官網 asset，並替換連結。\n${links.map((x) => x.original).join('\n')}\n-->\n`;
-    const html = source.replace(/<!doctype html>/i, (doctype) => `${doctype}\n${comment}`);
+    const html = exportHtml(source);
     return new Response(html, {
       headers: {
         'Content-Type': 'text/html; charset=utf-8',

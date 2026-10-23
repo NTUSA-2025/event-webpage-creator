@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { parseDriveLink, validateSource } from './media';
+import { exportHtml, parseDriveLink, validateSource } from './media';
 import { shareHash, shareToken } from './storage';
 import {
   createProject,
@@ -16,6 +16,8 @@ import { onRequest } from '../api/[[path]]';
 import type { Env } from './types';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
+import { JSDOM } from 'jsdom';
+import { iframeDocument, patchElement } from '../../src/editor';
 
 describe('generated page contracts', () => {
   it('accepts Drive sharing links with resource keys', () => {
@@ -43,6 +45,16 @@ describe('generated page contracts', () => {
         '<!doctype html><html><body><img src="https://example.com/a.png"></body></html>',
       ),
     ).toThrow(/Drive/);
+  });
+
+  it('delivers one HTML file with an engineering asset reminder', () => {
+    const link = 'https://drive.google.com/file/d/abcdef1234567890/view';
+    const source = `<!doctype html><html><head><style>body{color:red}</style></head><body><img src="${link}"><script>console.log('ready')</script></body></html>`;
+    const result = exportHtml(source);
+    expect(result).toContain('工程整合提醒');
+    expect(result).toContain(link);
+    expect(result).toContain('<style>body{color:red}</style>');
+    expect(result).toContain("<script>console.log('ready')</script>");
   });
 
   it('derives a stable revocable capability token from the project salt', async () => {
@@ -196,6 +208,30 @@ describe('multimodal page generation', () => {
     const modelRequest = requests.find((request) => request.url.endsWith('/chat/completions'));
     expect(modelRequest?.body).toContain('data:image/png;base64,');
     expect(modelRequest?.body).toContain('vision-model');
+  });
+});
+
+describe('visual editing', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('patches only a selected leaf and preserves the rest of the document', () => {
+    const dom = new JSDOM('', { url: 'https://studio.example.org' });
+    vi.stubGlobal('DOMParser', dom.window.DOMParser);
+    vi.stubGlobal('window', dom.window);
+    const source =
+      '<!doctype html><html><body><h1 data-editor-id="title">舊標題</h1><section data-editor-id="section"><p>保留</p></section></body></html>';
+    const changed = patchElement(source, 'title', {
+      text: '新標題',
+      dx: 12,
+      dy: -4,
+      width: '320px',
+    });
+    expect(changed).toContain('新標題');
+    expect(changed).toContain('translate: 12px -4px');
+    expect(changed).toContain('width: 320px');
+    expect(changed).toContain('<p>保留</p>');
+    expect(() => patchElement(source, 'section', { text: '錯誤覆蓋' })).toThrow(/巢狀/);
+    expect(iframeDocument(source, false)).toContain("connect-src 'none'");
   });
 });
 
