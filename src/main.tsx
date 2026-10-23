@@ -65,7 +65,10 @@ function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const onHash = () => setPath(route());
+    const onHash = () => {
+      setPath(route());
+      window.scrollTo(0, 0);
+    };
     window.addEventListener('hashchange', onHash);
     Promise.allSettled([api<{ user: User }>('me'), loadChrome()]).then(([me, common]) => {
       if (me.status === 'fulfilled') setUser(me.value.user);
@@ -646,9 +649,16 @@ function Editor({ id }: { id: string }) {
             <p>連結僅供設計檢視，不可作為正式活動宣傳頁。</p>
             {shareLink ? (
               <>
-                <div className="share-url" title={shareLink}>
+                <a
+                  className="share-url"
+                  href={shareLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={shareLink}
+                  aria-label="開啟分享預覽（新分頁）"
+                >
                   {shareLink}
-                </div>
+                </a>
                 <div className="share-actions">
                   <button onClick={() => navigator.clipboard.writeText(shareLink)}>
                     <Copy size={14} /> 複製

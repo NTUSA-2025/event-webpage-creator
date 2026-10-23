@@ -642,11 +642,15 @@ a {
   margin: 5px 0 7px;
 }
 .share-url {
+  display: block;
   font-size: 10px;
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;
   color: #518f9d;
+}
+.share-url:hover {
+  text-decoration: underline;
 }
 .share-actions {
   display: flex;
@@ -1120,9 +1124,11 @@ a {
   }
   .code-pane {
     height: 420px;
+    order: 2;
   }
   .preview-pane {
     height: 650px;
+    order: 1;
   }
   .editor-title .breadcrumb,
   .draft-badge {
