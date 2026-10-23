@@ -18,13 +18,22 @@ const labels = {
 const hrefs = ['', 'about', 'announcements', 'cases', 'forms', 'data'];
 
 function fallbackHeader(locale: 'zh' | 'en'): string {
-  const links = labels[locale].map((label, i) => `<a class="nav-link" href="https://ntusa.ntu.edu.tw/${hrefs[i]}">${label}</a>`).join('');
+  const links = labels[locale]
+    .map(
+      (label, i) => `<a class="nav-link" href="https://ntusa.ntu.edu.tw/${hrefs[i]}">${label}</a>`,
+    )
+    .join('');
   const switcher = `<div class="locale-switcher"><button class="locale-switcher__option ${locale === 'zh' ? 'is-active' : ''}" data-locale="zh">中</button><button class="locale-switcher__option ${locale === 'en' ? 'is-active' : ''}" data-locale="en">EN</button></div>`;
-  return `<header class="navbar"><div class="nav-inner"><a class="nav-logo" href="https://ntusa.ntu.edu.tw/"><img class="logo-mark" src="https://ntusa.ntu.edu.tw/NTUSA_Logo_1.png" alt="臺大學生會"><span class="logo-text"><span class="logo-title">國立臺灣大學學生會</span><span class="logo-sub">NTU Student Association</span></span></a><nav class="nav-links">${links}${switcher}</nav><button class="hamburger" aria-label="開啟選單"><span></span><span></span><span></span></button></div></header><div class="drawer-overlay"></div><aside class="drawer"><button class="drawer-close" aria-label="關閉選單">✕</button><div class="drawer-nav">${links}${switcher}</div></aside>`;
+  return `<header class="navbar"><div class="nav-inner"><a class="nav-logo" href="https://ntusa.ntu.edu.tw/"><img class="logo-mark" src="/NTUSA_Logo_1.png" alt="臺大學生會"><span class="logo-text"><span class="logo-title">國立臺灣大學學生會</span><span class="logo-sub">NTU Student Association</span></span></a><nav class="nav-links">${links}${switcher}</nav><button class="hamburger" aria-label="開啟選單"><span></span><span></span><span></span></button></div></header><div class="drawer-overlay"></div><aside class="drawer"><button class="drawer-close" aria-label="關閉選單">✕</button><div class="drawer-nav">${links}${switcher}</div></aside>`;
 }
 
 function fallbackFooter(locale: 'zh' | 'en'): string {
-  return `<footer class="footer"><div class="footer-inner"><div class="footer-brand"><img class="logo-mark small" src="https://ntusa.ntu.edu.tw/NTUSA_Logo_1.png" alt="臺大學生會"><div><div class="footer-name">國立臺灣大學學生會</div><div class="footer-name-en">NTU Student Association</div><a class="footer-contact" href="mailto:ntusamailbox@gmail.com">ntusamailbox@gmail.com</a><a class="footer-bug-report" href="mailto:infor@ntusa.ntu.edu.tw">infor@ntusa.ntu.edu.tw</a></div></div><div class="footer-links">${labels[locale].slice(0, 3).map((x, i) => `<a href="https://ntusa.ntu.edu.tw/${hrefs[i]}">${x}</a>`).join('')}</div><div class="footer-copy">© 2026 國立臺灣大學學生會資訊部</div></div></footer>`;
+  return `<footer class="footer"><div class="footer-inner"><div class="footer-brand"><img class="logo-mark small" src="/NTUSA_Logo_1.png" alt="臺大學生會"><div><div class="footer-name">國立臺灣大學學生會</div><div class="footer-name-en">NTU Student Association</div><a class="footer-contact" href="mailto:ntusamailbox@gmail.com">ntusamailbox@gmail.com</a><a class="footer-bug-report" href="mailto:infor@ntusa.ntu.edu.tw">infor@ntusa.ntu.edu.tw</a></div></div><div class="footer-links">${labels[
+    locale
+  ]
+    .slice(0, 3)
+    .map((x, i) => `<a href="https://ntusa.ntu.edu.tw/${hrefs[i]}">${x}</a>`)
+    .join('')}</div><div class="footer-copy">© 2026 國立臺灣大學學生會資訊部</div></div></footer>`;
 }
 
 let chromeCache: ChromeSnapshot | null | undefined;
@@ -34,10 +43,20 @@ export async function loadChrome(): Promise<ChromeSnapshot | null> {
   chromeCache = result.chrome;
   return chromeCache;
 }
-export function setChromeCache(snapshot: ChromeSnapshot): void { chromeCache = snapshot; }
+export function setChromeCache(snapshot: ChromeSnapshot): void {
+  chromeCache = snapshot;
+}
 
-export function ChromeSlot({ kind, snapshot, locale, onLocale }: {
-  kind: 'header' | 'footer'; snapshot: ChromeSnapshot | null; locale: 'zh' | 'en'; onLocale: (locale: 'zh' | 'en') => void;
+export function ChromeSlot({
+  kind,
+  snapshot,
+  locale,
+  onLocale,
+}: {
+  kind: 'header' | 'footer';
+  snapshot: ChromeSnapshot | null;
+  locale: 'zh' | 'en';
+  onLocale: (locale: 'zh' | 'en') => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -45,7 +64,9 @@ export function ChromeSlot({ kind, snapshot, locale, onLocale }: {
   useEffect(() => {
     if (!host.current) return;
     const root = host.current.shadowRoot || host.current.attachShadow({ mode: 'open' });
-    const html = snapshot?.[locale][kind] || (kind === 'header' ? fallbackHeader(locale) : fallbackFooter(locale));
+    const html =
+      snapshot?.[locale][kind] ||
+      (kind === 'header' ? fallbackHeader(locale) : fallbackFooter(locale));
     root.innerHTML = `<style>${snapshot?.css || fallbackCss}</style>${html}`;
     if (kind === 'header') {
       const drawer = root.querySelector('.drawer');

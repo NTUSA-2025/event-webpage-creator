@@ -42,11 +42,14 @@ export interface ChromeSnapshot {
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`/api/${path}`, {
     ...options,
-    headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers },
+    headers: {
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...options.headers,
+    },
     credentials: 'same-origin',
   });
   if (!response.ok) {
-    const data = await response.json().catch(() => ({})) as { error?: string };
+    const data = (await response.json().catch(() => ({}))) as { error?: string };
     throw new Error(data.error || `請求失敗（${response.status}）`);
   }
   return response.json() as Promise<T>;

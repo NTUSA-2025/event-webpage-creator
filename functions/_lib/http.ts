@@ -1,5 +1,8 @@
 export class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
     super(message);
   }
 }
@@ -12,7 +15,10 @@ export function json(data: unknown, status = 200, extraHeaders?: HeadersInit): R
   return new Response(JSON.stringify(data), { status, headers });
 }
 
-export async function readJson(request: Request, limit = 2_000_000): Promise<Record<string, unknown>> {
+export async function readJson(
+  request: Request,
+  limit = 2_000_000,
+): Promise<Record<string, unknown>> {
   if (!request.headers.get('content-type')?.includes('application/json')) {
     throw new HttpError(415, '請使用 JSON 提交資料');
   }
@@ -20,7 +26,8 @@ export async function readJson(request: Request, limit = 2_000_000): Promise<Rec
   if (raw.length > limit) throw new HttpError(413, '資料太大');
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('object required');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+      throw new Error('object required');
     return parsed as Record<string, unknown>;
   } catch {
     throw new HttpError(400, 'JSON 格式錯誤');
@@ -29,7 +36,8 @@ export async function readJson(request: Request, limit = 2_000_000): Promise<Rec
 
 export function stringField(body: Record<string, unknown>, field: string, max: number): string {
   const value = body[field];
-  if (typeof value !== 'string' || value.length > max) throw new HttpError(400, `${field} 格式錯誤`);
+  if (typeof value !== 'string' || value.length > max)
+    throw new HttpError(400, `${field} 格式錯誤`);
   return value;
 }
 
@@ -51,7 +59,8 @@ export function textHtml(html: string, status = 200): Response {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
-      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; frame-src https:; script-src 'unsafe-inline'; form-action https:; base-uri 'none'",
+      'Content-Security-Policy':
+        "default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; frame-src https:; script-src 'unsafe-inline'; form-action https:; base-uri 'none'",
       'X-Robots-Tag': 'noindex, nofollow',
     },
   });

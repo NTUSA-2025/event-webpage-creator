@@ -4,6 +4,7 @@ export interface EditorMessage {
   id: string;
   tag?: string;
   text?: string;
+  leaf?: boolean;
   src?: string;
   dx?: number;
   dy?: number;
@@ -13,7 +14,7 @@ export interface EditorMessage {
 
 const bridge = `<script>
 (() => {
-  const send = (type, element, more = {}) => parent.postMessage({ channel: 'event-page-editor', type, id: element.getAttribute('data-editor-id'), tag: element.tagName.toLowerCase(), text: element.textContent?.trim().slice(0, 500) || '', src: element.getAttribute('src') || '', ...more }, '*');
+  const send = (type, element, more = {}) => parent.postMessage({ channel: 'event-page-editor', type, id: element.getAttribute('data-editor-id'), tag: element.tagName.toLowerCase(), leaf: element.children.length === 0, text: element.textContent?.trim().slice(0, 500) || '', src: element.getAttribute('src') || '', ...more }, '*');
   const editable = (target) => target?.closest?.('[data-editor-id]');
   let drag;
   const frame = document.createElement('div');
@@ -48,7 +49,7 @@ const bridge = `<script>
   document.addEventListener('pointerup', (event) => {
     if (!drag) return;
     const dx = Math.round(event.clientX - drag.x), dy = Math.round(event.clientY - drag.y);
-    if (drag.resize) send('resize', drag.element, { width: Math.max(24, Math.round(drag.width + dx)) + 'px', height: Math.max(24, Math.round(drag.height + dy)) + 'px' });
+    if (drag.resize && Math.abs(dx) + Math.abs(dy) > 4) send('resize', drag.element, { width: Math.max(24, Math.round(drag.width + dx)) + 'px', height: Math.max(24, Math.round(drag.height + dy)) + 'px' });
     else if (Math.abs(dx) + Math.abs(dy) > 4) send('drag', drag.element, { dx, dy });
     drag = null;
   }, true);
@@ -66,16 +67,29 @@ const bridge = `<script>
 
 export function iframeDocument(html: string, editMode: boolean): string {
   const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src ${window.location.origin} https: data:; frame-src https:; form-action https:; connect-src 'none'; base-uri 'none'">`;
-  const protectedHtml = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (head) => `${head}${csp}`) : `${csp}${html}`;
+  const protectedHtml = /<head[^>]*>/i.test(html)
+    ? html.replace(/<head[^>]*>/i, (head) => `${head}${csp}`)
+    : `${csp}${html}`;
   if (!editMode) return protectedHtml;
-  return /<\/body>/i.test(protectedHtml) ? protectedHtml.replace(/<\/body>/i, `${bridge}</body>`) : `${protectedHtml}${bridge}`;
+  return /<\/body>/i.test(protectedHtml)
+    ? protectedHtml.replace(/<\/body>/i, `${bridge}</body>`)
+    : `${protectedHtml}${bridge}`;
 }
 
-export function patchElement(html: string, id: string, patch: { text?: string; src?: string; dx?: number; dy?: number; width?: string; height?: string }): string {
+export function patchElement(
+  html: string,
+  id: string,
+  patch: { text?: string; src?: string; dx?: number; dy?: number; width?: string; height?: string },
+): string {
   const document = new DOMParser().parseFromString(html, 'text/html');
-  const element = [...document.querySelectorAll('[data-editor-id]')].find((node) => node.getAttribute('data-editor-id') === id) as HTMLElement | undefined;
+  const element = [...document.querySelectorAll('[data-editor-id]')].find(
+    (node) => node.getAttribute('data-editor-id') === id,
+  ) as HTMLElement | undefined;
   if (!element) throw new Error('此元素無法視覺編輯，請使用程式碼編輯器');
-  if (patch.text !== undefined) element.textContent = patch.text;
+  if (patch.text !== undefined) {
+    if (element.children.length) throw new Error('此元素含有巢狀內容，請使用程式碼編輯器修改文字');
+    element.textContent = patch.text;
+  }
   if (patch.src !== undefined) element.setAttribute('src', patch.src);
   if (patch.dx !== undefined || patch.dy !== undefined) {
     const current = element.style.translate.match(/(-?\d+(?:\.\d+)?)px\s+(-?\d+(?:\.\d+)?)px/);
