@@ -6,3 +6,6 @@ dist/
 !.dev.vars.example
 !.env.example
 *.local
+# Playwright CLI output (may contain credentials)
+.playwright-cli/
+.playwright/
