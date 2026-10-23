@@ -488,6 +488,9 @@ a {
   background: none;
   border: 0;
 }
+.editor-section-nav {
+  display: none;
+}
 .editor-grid {
   display: grid;
   grid-template-columns: 300px minmax(300px, 35%) minmax(390px, 1fr);
@@ -744,7 +747,7 @@ a {
   background: #202731;
   color: #dce6e9;
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.65;
   tab-size: 2;
 }
@@ -832,6 +835,11 @@ a {
   padding: 6px;
   font-size: 11px;
   margin-top: 4px;
+}
+.inspector-hint {
+  margin: 8px 0 0;
+  color: #737f85;
+  font-size: 11px;
 }
 
 /* Share and admin */
@@ -1114,9 +1122,48 @@ a {
   .admin-card .rule-form {
     grid-template-columns: 1fr;
   }
+  .new-project input,
+  .prompt-box textarea,
+  .code-editor,
+  .inspector-fields input,
+  .admin-card input,
+  .admin-card select {
+    font-size: 16px;
+  }
   .editor-grid {
     display: flex;
     flex-direction: column;
+  }
+  .editor-section-nav {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    flex: none;
+    height: 46px;
+    background: #fff;
+    border-bottom: 1px solid #e0e4e6;
+  }
+  .editor-section-nav button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    border: 0;
+    background: transparent;
+    color: #4d7882;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .editor-section-nav button:focus-visible {
+    outline: 2px solid #4d9aac;
+    outline-offset: -3px;
+  }
+  .assistant-pane,
+  .preview-pane,
+  .code-pane {
+    scroll-margin-top: 46px;
   }
   .assistant-pane {
     min-height: 500px;
@@ -1130,9 +1177,11 @@ a {
     height: 650px;
     order: 1;
   }
-  .editor-title .breadcrumb,
-  .draft-badge {
+  .editor-title .breadcrumb {
     display: none;
+  }
+  .editor-title {
+    flex-wrap: wrap;
   }
   .toolbar-actions {
     width: 100%;

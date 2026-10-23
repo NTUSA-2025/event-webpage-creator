@@ -63,19 +63,44 @@ function App() {
     localStorage.getItem('locale') === 'en' ? 'en' : 'zh',
   );
   const [loading, setLoading] = useState(true);
+  const [sessionError, setSessionError] = useState('');
+  const currentPath = useRef(path);
+  const editorDirty = useRef(false);
+  const onEditorDirtyChange = useCallback((dirty: boolean) => {
+    editorDirty.current = dirty;
+  }, []);
 
   useEffect(() => {
     const onHash = () => {
-      setPath(route());
+      const nextPath = route();
+      const leavingEditor =
+        currentPath.current[0] === 'edit' &&
+        (nextPath[0] !== 'edit' || nextPath[1] !== currentPath.current[1]);
+      if (leavingEditor && editorDirty.current && !window.confirm('草稿尚未儲存，確定要離開嗎？')) {
+        window.history.replaceState(null, '', `#/${currentPath.current.join('/')}`);
+        return;
+      }
+      currentPath.current = nextPath;
+      if (leavingEditor) editorDirty.current = false;
+      setPath(nextPath);
       window.scrollTo(0, 0);
     };
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!editorDirty.current) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
     window.addEventListener('hashchange', onHash);
+    window.addEventListener('beforeunload', onBeforeUnload);
     Promise.allSettled([api<{ user: User }>('me'), loadChrome()]).then(([me, common]) => {
       if (me.status === 'fulfilled') setUser(me.value.user);
       if (common.status === 'fulfilled') setChrome(common.value);
       setLoading(false);
     });
-    return () => window.removeEventListener('hashchange', onHash);
+    return () => {
+      window.removeEventListener('hashchange', onHash);
+      window.removeEventListener('beforeunload', onBeforeUnload);
+    };
   }, []);
 
   const changeLocale = useCallback((value: 'zh' | 'en') => {
@@ -83,9 +108,16 @@ function App() {
     localStorage.setItem('locale', value);
   }, []);
   const logout = async () => {
-    await api('auth/logout', { method: 'POST' });
-    setUser(null);
-    go('dashboard');
+    if (editorDirty.current && !window.confirm('草稿尚未儲存，確定要登出嗎？')) return;
+    setSessionError('');
+    try {
+      await api('auth/logout', { method: 'POST' });
+      editorDirty.current = false;
+      setUser(null);
+      go('dashboard');
+    } catch (error) {
+      setSessionError(`登出失敗：${err(error)}`);
+    }
   };
   const viewToken = path[0] === 'view' ? path[1] : undefined;
 
@@ -123,16 +155,24 @@ function App() {
           )}
         </div>
       </div>
+      {sessionError && (
+        <div className="editor-alert error-message" role="alert">
+          {sessionError}
+          <button aria-label="關閉錯誤訊息" onClick={() => setSessionError('')}>
+            ✕
+          </button>
+        </div>
+      )}
       <main className="app-main">
         {loading ? (
           <div className="loading-screen">
             <LoaderCircle className="spin" /> 載入中
           </div>
         ) : path[0] === 'view' && viewToken ? (
-          <ShareView token={viewToken} user={user} />
+          <ShareView key={viewToken} token={viewToken} user={user} />
         ) : path[0] === 'edit' && path[1] ? (
           user?.canCreate ? (
-            <Editor key={path[1]} id={path[1]} />
+            <Editor key={path[1]} id={path[1]} onDirtyChange={onEditorDirtyChange} />
           ) : (
             <AccessPage user={user} />
           )
@@ -188,13 +228,15 @@ function AccessPage({ user }: { user: User | null }) {
 
 function Dashboard({ user }: { user: User }) {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => {
     api<{ projects: Project[] }>('projects')
       .then((r) => setProjects(r.projects))
-      .catch((e) => setError(err(e)));
+      .catch((e) => setError(err(e)))
+      .finally(() => setProjectsLoading(false));
   }, []);
   const create = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -255,9 +297,15 @@ function Dashboard({ user }: { user: User }) {
             <span className="section-kicker">02 / YOUR PROJECTS</span>
             <h2>我的設計稿</h2>
           </div>
-          <span className="count-badge">{projects.length} 個活動</span>
+          <span className="count-badge">
+            {projectsLoading ? '載入中' : `${projects.length} 個活動`}
+          </span>
         </div>
-        {projects.length ? (
+        {projectsLoading ? (
+          <div className="empty-state" role="status">
+            <LoaderCircle size={17} className="spin" /> 載入設計稿…
+          </div>
+        ) : projects.length ? (
           <div className="project-grid">
             {projects.map((p) => (
               <button className="project-card" key={p.id} onClick={() => go(`edit/${p.id}`)}>
@@ -281,9 +329,9 @@ function Dashboard({ user }: { user: User }) {
               </button>
             ))}
           </div>
-        ) : (
+        ) : !error ? (
           <div className="empty-state">還沒有活動設計稿。從上方建立第一個活動吧。</div>
-        )}
+        ) : null}
       </section>
     </div>
   );
@@ -297,7 +345,7 @@ type ProjectDetail = {
   chat: ChatMessage[];
 };
 
-function Editor({ id }: { id: string }) {
+function Editor({ id, onDirtyChange }: { id: string; onDirtyChange: (dirty: boolean) => void }) {
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   const [source, setSource] = useState('');
   const [rendered, setRendered] = useState('');
@@ -313,6 +361,10 @@ function Editor({ id }: { id: string }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const sourceRef = useRef(source);
   sourceRef.current = source;
+  const dirty = !!detail && source !== detail.html;
+
+  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
   const reload = useCallback(async () => {
     const data = await api<ProjectDetail>(`projects/${id}`);
@@ -504,6 +556,19 @@ function Editor({ id }: { id: string }) {
       setError(err(e));
     }
   };
+  const copyShareLink = async () => {
+    if (!detail?.project.shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareAbsolute(detail.project.shareUrl));
+      setError('');
+      setNotice('分享連結已複製。');
+    } catch {
+      setError('無法複製連結，請開啟分享預覽後從網址列複製。');
+    }
+  };
+  const jumpTo = (section: string) => {
+    document.getElementById(section)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   const previewDocument = useMemo(() => iframeDocument(rendered, editMode), [rendered, editMode]);
   if (!detail)
@@ -516,7 +581,6 @@ function Editor({ id }: { id: string }) {
         )}
       </div>
     );
-  const dirty = source !== detail.html;
   const shareLink = detail.project.shareUrl && shareAbsolute(detail.project.shareUrl);
   return (
     <div className="editor-page">
@@ -535,27 +599,44 @@ function Editor({ id }: { id: string }) {
         </div>
         <div className="toolbar-actions">
           <button className="secondary-button" onClick={saveClick} disabled={!!busy || !dirty}>
-            <Save size={16} /> 儲存草稿
+            {busy === 'save' ? <LoaderCircle size={16} className="spin" /> : <Save size={16} />}
+            {busy === 'save' ? '儲存中…' : '儲存草稿'}
           </button>
           <button className="primary-button" onClick={() => share()} disabled={!!busy}>
-            <Link2 size={16} /> {detail.project.sharedRevisionId ? '更新分享版' : '建立分享連結'}
+            {busy === 'share' ? <LoaderCircle size={16} className="spin" /> : <Link2 size={16} />}
+            {busy === 'share'
+              ? '更新中…'
+              : detail.project.sharedRevisionId
+                ? '更新分享版'
+                : '建立分享連結'}
           </button>
         </div>
       </div>
       {error && (
-        <div className="editor-alert error-message">
+        <div className="editor-alert error-message" role="alert">
           {error}
           <button onClick={() => setError('')}>✕</button>
         </div>
       )}
       {notice && (
-        <div className="editor-alert success-message">
+        <div className="editor-alert success-message" role="status">
           <Check size={16} /> {notice}
           <button onClick={() => setNotice('')}>✕</button>
         </div>
       )}
+      <nav className="editor-section-nav" aria-label="編輯區段">
+        <button onClick={() => jumpTo('editor-assistant')}>
+          <MessageSquare size={15} /> 對話
+        </button>
+        <button onClick={() => jumpTo('editor-preview')}>
+          <Eye size={15} /> 預覽
+        </button>
+        <button onClick={() => jumpTo('editor-code')}>
+          <Code2 size={15} /> 原始碼
+        </button>
+      </nav>
       <div className="editor-grid">
-        <aside className="assistant-pane">
+        <aside className="assistant-pane" id="editor-assistant">
           <div className="pane-tabs">
             <button className={panel === 'chat' ? 'active' : ''} onClick={() => setPanel('chat')}>
               <MessageSquare size={16} /> 對話
@@ -660,7 +741,7 @@ function Editor({ id }: { id: string }) {
                   {shareLink}
                 </a>
                 <div className="share-actions">
-                  <button onClick={() => navigator.clipboard.writeText(shareLink)}>
+                  <button onClick={copyShareLink}>
                     <Copy size={14} /> 複製
                   </button>
                   <button onClick={() => share(true)}>
@@ -676,7 +757,7 @@ function Editor({ id }: { id: string }) {
             )}
           </div>
         </aside>
-        <section className="code-pane">
+        <section className="code-pane" id="editor-code">
           <div className="pane-heading">
             <div>
               <Code2 size={17} /> 原始碼 <span className="source-indicator">HTML · CSS · JS</span>
@@ -691,7 +772,7 @@ function Editor({ id }: { id: string }) {
             className="code-editor"
           />
         </section>
-        <section className="preview-pane">
+        <section className="preview-pane" id="editor-preview">
           <div className="pane-heading">
             <div>
               <Eye size={17} /> 即時預覽
@@ -783,6 +864,7 @@ function Editor({ id }: { id: string }) {
                   </label>
                 </div>
               )}
+              {selected && <p className="inspector-hint">修改欄位後按 Tab 套用，再儲存草稿。</p>}
             </div>
           )}
         </section>
@@ -810,19 +892,21 @@ function ShareView({ token, user }: { token: string; user: User | null }) {
           <h1>{data?.title || '活動網頁預覽'}</h1>
           <p>此連結僅供檢視與討論；正式活動頁須經工程師審查並整合至官網。</p>
         </div>
-        <div className="share-banner-actions">
-          {user?.isEngineer ? (
-            <a className="primary-button" href={`/api/view/${token}/export`}>
-              <Download size={16} /> 下載單檔 HTML
-            </a>
-          ) : user ? (
-            <span className="restricted-note">下載限工程師群組</span>
-          ) : (
-            <button className="secondary-button" onClick={() => signIn(`/#/view/${token}`)}>
-              <LogIn size={16} /> 工程師登入
-            </button>
-          )}
-        </div>
+        {data && (
+          <div className="share-banner-actions">
+            {user?.isEngineer ? (
+              <a className="primary-button" href={`/api/view/${token}/export`}>
+                <Download size={16} /> 下載單檔 HTML
+              </a>
+            ) : user ? (
+              <span className="restricted-note">下載限工程師群組</span>
+            ) : (
+              <button className="secondary-button" onClick={() => signIn(`/#/view/${token}`)}>
+                <LogIn size={16} /> 工程師登入
+              </button>
+            )}
+          </div>
+        )}
       </div>
       {error ? (
         <div className="share-error">{error}</div>
