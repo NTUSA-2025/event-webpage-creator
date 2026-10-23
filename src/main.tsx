@@ -355,16 +355,48 @@ function Editor({ id, onDirtyChange }: { id: string; onDirtyChange: (dirty: bool
   const [editMode, setEditMode] = useState(true);
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
   const [panel, setPanel] = useState<'chat' | 'history'>('chat');
+  const [codeOpen, setCodeOpen] = useState(false);
   const [busy, setBusy] = useState<'save' | 'ai' | 'share' | 'restore' | ''>('');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const frame = useRef<HTMLIFrameElement>(null);
+  const codeEditor = useRef<HTMLTextAreaElement>(null);
+  const codeClose = useRef<HTMLButtonElement>(null);
   const sourceRef = useRef(source);
   sourceRef.current = source;
   const dirty = !!detail && source !== detail.html;
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
+  useEffect(() => {
+    if (!codeOpen) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    codeEditor.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setCodeOpen(false);
+      } else if (
+        event.key === 'Tab' &&
+        event.shiftKey &&
+        document.activeElement === codeClose.current
+      ) {
+        event.preventDefault();
+        codeEditor.current?.focus();
+      } else if (
+        event.key === 'Tab' &&
+        !event.shiftKey &&
+        document.activeElement === codeEditor.current
+      ) {
+        event.preventDefault();
+        codeClose.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      previousFocus?.focus();
+    };
+  }, [codeOpen]);
 
   const reload = useCallback(async () => {
     const data = await api<ProjectDetail>(`projects/${id}`);
@@ -485,7 +517,7 @@ function Editor({ id, onDirtyChange }: { id: string; onDirtyChange: (dirty: bool
       setPrompt('');
       setMediaInput('');
       setSelected(null);
-      setNotice('AI 已產生新版本。請檢查預覽與原始碼。');
+      setNotice('AI 已產生新版本。請檢查預覽，需要時可開啟原始碼。');
       await reload();
     } catch (e) {
       setError(err(e));
@@ -625,17 +657,33 @@ function Editor({ id, onDirtyChange }: { id: string; onDirtyChange: (dirty: bool
         </div>
       )}
       <nav className="editor-section-nav" aria-label="編輯區段">
+        <button
+          onClick={() => setCodeOpen(true)}
+          aria-expanded={codeOpen}
+          aria-controls={codeOpen ? 'editor-code' : undefined}
+        >
+          <Code2 size={15} /> 原始碼
+        </button>
         <button onClick={() => jumpTo('editor-assistant')}>
           <MessageSquare size={15} /> 對話
         </button>
         <button onClick={() => jumpTo('editor-preview')}>
           <Eye size={15} /> 預覽
         </button>
-        <button onClick={() => jumpTo('editor-code')}>
-          <Code2 size={15} /> 原始碼
-        </button>
       </nav>
       <div className="editor-grid">
+        <div className="code-rail">
+          <button
+            className="code-rail-toggle"
+            onClick={() => setCodeOpen(true)}
+            aria-expanded={codeOpen}
+            aria-controls={codeOpen ? 'editor-code' : undefined}
+            title="開啟原始碼"
+          >
+            <Code2 size={18} />
+            <span>原始碼</span>
+          </button>
+        </div>
         <aside className="assistant-pane" id="editor-assistant">
           <div className="pane-tabs">
             <button className={panel === 'chat' ? 'active' : ''} onClick={() => setPanel('chat')}>
@@ -757,21 +805,6 @@ function Editor({ id, onDirtyChange }: { id: string; onDirtyChange: (dirty: bool
             )}
           </div>
         </aside>
-        <section className="code-pane" id="editor-code">
-          <div className="pane-heading">
-            <div>
-              <Code2 size={17} /> 原始碼 <span className="source-indicator">HTML · CSS · JS</span>
-            </div>
-            <small>程式碼是最終依據</small>
-          </div>
-          <textarea
-            spellCheck={false}
-            value={source}
-            onChange={(e) => setSource(e.target.value)}
-            aria-label="活動頁原始碼"
-            className="code-editor"
-          />
-        </section>
         <section className="preview-pane" id="editor-preview">
           <div className="pane-heading">
             <div>
@@ -868,6 +901,48 @@ function Editor({ id, onDirtyChange }: { id: string; onDirtyChange: (dirty: bool
             </div>
           )}
         </section>
+        {codeOpen && (
+          <>
+            <button
+              type="button"
+              className="code-backdrop"
+              onClick={() => setCodeOpen(false)}
+              aria-label="關閉原始碼側欄"
+              tabIndex={-1}
+            />
+            <section
+              className="code-pane"
+              id="editor-code"
+              role="dialog"
+              aria-modal="true"
+              aria-label="活動頁原始碼"
+            >
+              <div className="pane-heading">
+                <div>
+                  <Code2 size={17} /> 原始碼{' '}
+                  <span className="source-indicator">HTML · CSS · JS</span>
+                </div>
+                <button
+                  ref={codeClose}
+                  type="button"
+                  className="code-close"
+                  onClick={() => setCodeOpen(false)}
+                  aria-label="關閉原始碼側欄"
+                >
+                  ✕
+                </button>
+              </div>
+              <textarea
+                ref={codeEditor}
+                spellCheck={false}
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
+                aria-label="活動頁原始碼"
+                className="code-editor"
+              />
+            </section>
+          </>
+        )}
       </div>
     </div>
   );

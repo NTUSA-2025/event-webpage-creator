@@ -7,7 +7,7 @@
 - Vite/React 前端部署於 Cloudflare Pages；`functions/api/[[path]].ts` 是 Pages Functions API。`public/_routes.json` 只讓 `/api/*` 進入 Functions。
 - Google OAuth 登入後，以 Google Workspace Directory API 即時核對管理員、工程師及建立者群組。建立者也可由管理後台的信箱或網域規則授權。
 - D1 保存專案、權限、對話、版本索引和分享資訊；私有 R2 保存每版 HTML 與官網版位快照。編輯草稿不影響分享版；「更新分享版」後，同一 magic link 才顯示新內容。作者可撤銷或重建連結。
-- 右側預覽將生成程式碼放在無同源權限的 sandbox iframe；有 `data-editor-id` 的元素可點選、拖拉、調整尺寸及就地改字。原始碼為最終依據，複雜元素可直接在程式碼區修改。
+- 右側預覽將生成程式碼放在無同源權限的 sandbox iframe；有 `data-editor-id` 的元素可點選、拖拉、調整尺寸及就地改字。原始碼收在最左側側欄，點選後可直接修改複雜元素。
 - 工程師須屬 `ENGINEER_GROUP_EMAIL` 才可下載分享版 HTML。下載檔不含平台 nav/footer，會註明 Google Drive 素材需在整合官網時下載成正式 asset。
 
 ## Cloudflare Pages 設定
