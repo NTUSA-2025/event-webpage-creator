@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ArrowLeft,
@@ -502,6 +502,7 @@ function Editor({ id }: { id: string }) {
     }
   };
 
+  const previewDocument = useMemo(() => iframeDocument(rendered, editMode), [rendered, editMode]);
   if (!detail)
     return (
       <div className="loading-screen">
@@ -720,7 +721,7 @@ function Editor({ id }: { id: string }) {
               title="活動頁預覽"
               sandbox="allow-scripts allow-forms"
               className={`preview-frame ${device}`}
-              srcDoc={iframeDocument(rendered, editMode)}
+              srcDoc={previewDocument}
             />
           </div>
           {editMode && (
@@ -788,6 +789,7 @@ function ShareView({ token, user }: { token: string; user: User | null }) {
       .then(setData)
       .catch((e) => setError(err(e)));
   }, [token]);
+  const shareDocument = useMemo(() => iframeDocument(data?.html || '', false), [data?.html]);
   return (
     <div className="share-view">
       <div className="share-banner">
@@ -819,7 +821,7 @@ function ShareView({ token, user }: { token: string; user: User | null }) {
           className="share-frame"
           sandbox="allow-scripts allow-forms"
           title={data.title}
-          srcDoc={iframeDocument(data.html, false)}
+          srcDoc={shareDocument}
         />
       ) : (
         <div className="loading-screen">

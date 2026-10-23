@@ -12,7 +12,7 @@ export interface EditorMessage {
   height?: string;
 }
 
-const bridge = `<script>
+const bridge = `
 (() => {
   const send = (type, element, more = {}) => parent.postMessage({ channel: 'event-page-editor', type, id: element.getAttribute('data-editor-id'), tag: element.tagName.toLowerCase(), leaf: element.children.length === 0, text: element.textContent?.trim().slice(0, 500) || '', src: element.getAttribute('src') || '', ...more }, '*');
   const editable = (target) => target?.closest?.('[data-editor-id]');
@@ -63,17 +63,20 @@ const bridge = `<script>
     element.addEventListener('blur', finish);
   }, true);
 })();
-</script>`;
+`;
 
 export function iframeDocument(html: string, editMode: boolean): string {
-  const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src ${window.location.origin} https: data:; frame-src https:; form-action https:; connect-src 'none'; base-uri 'none'">`;
-  const protectedHtml = /<head[^>]*>/i.test(html)
-    ? html.replace(/<head[^>]*>/i, (head) => `${head}${csp}`)
-    : `${csp}${html}`;
-  if (!editMode) return protectedHtml;
-  return /<\/body>/i.test(protectedHtml)
-    ? protectedHtml.replace(/<\/body>/i, `${bridge}</body>`)
-    : `${protectedHtml}${bridge}`;
+  const document = new DOMParser().parseFromString(html, 'text/html');
+  const csp = document.createElement('meta');
+  csp.httpEquiv = 'Content-Security-Policy';
+  csp.content = `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src ${window.location.origin} https: data:; frame-src https:; form-action https:; connect-src 'none'; base-uri 'none'`;
+  document.head.insertBefore(csp, document.head.firstChild);
+  if (editMode) {
+    const script = document.createElement('script');
+    script.textContent = bridge;
+    document.body.appendChild(script);
+  }
+  return `<!doctype html>\n${document.documentElement.outerHTML}`;
 }
 
 export function patchElement(

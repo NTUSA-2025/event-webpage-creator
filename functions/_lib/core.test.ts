@@ -17,7 +17,50 @@ import type { Env } from './types';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
+import { SignJWT } from 'jose';
 import { iframeDocument, patchElement } from '../../src/editor';
+
+function inMemoryEnv() {
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec(readFileSync('migrations/0001_init.sql', 'utf8'));
+  const memory = new Map<string, string>();
+  const statement = (sql: string, args: Array<string | null> = []) => ({
+    bind: (...values: Array<string | null>) => statement(sql, values),
+    first: async () => sqlite.prepare(sql).get(...args) || null,
+    all: async () => ({ results: sqlite.prepare(sql).all(...args) }),
+    run: async () => ({ meta: { changes: sqlite.prepare(sql).run(...args).changes } }),
+  });
+  const db = {
+    prepare: statement,
+    batch: async (statements: Array<{ run: () => Promise<{ meta: { changes: number } }> }>) => {
+      sqlite.exec('BEGIN');
+      try {
+        const results = [];
+        for (const item of statements) results.push(await item.run());
+        sqlite.exec('COMMIT');
+        return results;
+      } catch (error) {
+        sqlite.exec('ROLLBACK');
+        throw error;
+      }
+    },
+  };
+  const files = {
+    put: async (key: string, body: string) => {
+      memory.set(key, body);
+    },
+    get: async (key: string) => (memory.has(key) ? { text: async () => memory.get(key)! } : null),
+  };
+  return {
+    sqlite,
+    env: {
+      DB: db,
+      FILES: files,
+      SESSION_SECRET: 'x'.repeat(48),
+      PUBLIC_ORIGIN: 'https://studio.example.org',
+    } as unknown as Env,
+  };
+}
 
 describe('generated page contracts', () => {
   it('accepts Drive sharing links with resource keys', () => {
@@ -105,38 +148,7 @@ describe('authentication boundary', () => {
 
 describe('draft and sharing flow', () => {
   it('keeps draft changes out of the view link until published and revokes rotated links', async () => {
-    const sqlite = new DatabaseSync(':memory:');
-    sqlite.exec(readFileSync('migrations/0001_init.sql', 'utf8'));
-    const memory = new Map<string, string>();
-    const prepare = (sql: string) => ({
-      bind: (...args: Array<string | null>) => ({
-        first: async () => sqlite.prepare(sql).get(...args) || null,
-        all: async () => ({ results: sqlite.prepare(sql).all(...args) }),
-        run: async () => ({ meta: { changes: sqlite.prepare(sql).run(...args).changes } }),
-      }),
-    });
-    const db = {
-      prepare,
-      batch: async (statements: Array<{ run: () => Promise<{ meta: { changes: number } }> }>) => {
-        sqlite.exec('BEGIN');
-        try {
-          const results = [];
-          for (const statement of statements) results.push(await statement.run());
-          sqlite.exec('COMMIT');
-          return results;
-        } catch (error) {
-          sqlite.exec('ROLLBACK');
-          throw error;
-        }
-      },
-    };
-    const files = {
-      put: async (key: string, body: string) => {
-        memory.set(key, body);
-      },
-      get: async (key: string) => (memory.has(key) ? { text: async () => memory.get(key)! } : null),
-    };
-    const env = { DB: db, FILES: files, SESSION_SECRET: 'x'.repeat(48) } as unknown as Env;
+    const { env, sqlite } = inMemoryEnv();
     const created = await createProject(env, '迎新活動', 'owner', 'owner@example.org');
     const firstToken = await publish(env, created);
     const oldSharedId = (await publicProject(env, firstToken)).shared_revision_id;
@@ -157,6 +169,58 @@ describe('draft and sharing flow', () => {
     const nextToken = await publish(env, await getProject(env, created.id), true);
     expect(nextToken).not.toBe(firstToken);
     await expect(publicProject(env, firstToken)).rejects.toThrow(/失效/);
+    sqlite.close();
+  });
+
+  it('serves creator edits and public snapshots through Pages Functions', async () => {
+    const { env, sqlite } = inMemoryEnv();
+    sqlite
+      .prepare('INSERT INTO creator_rules (id, kind, value) VALUES (?, ?, ?)')
+      .run('rule', 'email', 'owner@example.org');
+    const session = await new SignJWT({ sub: 'owner', email: 'owner@example.org', name: 'Owner' })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setExpirationTime('1h')
+      .sign(new TextEncoder().encode(env.SESSION_SECRET));
+    const call = async (method: string, parts: string[], body?: object) =>
+      onRequest({
+        request: new Request(`${env.PUBLIC_ORIGIN}/api/${parts.join('/')}`, {
+          method,
+          headers: {
+            Origin: env.PUBLIC_ORIGIN,
+            Cookie: `session=${session}`,
+            ...(body ? { 'Content-Type': 'application/json' } : {}),
+          },
+          body: body ? JSON.stringify(body) : undefined,
+        }),
+        env,
+        params: { path: parts },
+      } as never);
+    const created = await call('POST', ['projects'], { title: '迎新活動' });
+    expect(created.status).toBe(201);
+    const projectId = ((await created.json()) as { project: { id: string } }).project.id;
+    const first = (await (await call('GET', ['projects', projectId])).json()) as {
+      project: { currentRevisionId: string };
+    };
+    const html = '<!doctype html><html><body><h1>第一版</h1></body></html>';
+    const saved = await call('POST', ['projects', projectId, 'revisions'], {
+      html,
+      expectedRevisionId: first.project.currentRevisionId,
+    });
+    expect(saved.status).toBe(200);
+    const shared = (await (await call('POST', ['projects', projectId, 'share'])).json()) as {
+      shareUrl: string;
+    };
+    const token = shared.shareUrl.split('/').pop()!;
+    const publicResponse = await onRequest({
+      request: new Request(`${env.PUBLIC_ORIGIN}/api/view/${token}`),
+      env,
+      params: { path: ['view', token] },
+    } as never);
+    expect(publicResponse.status).toBe(200);
+    const publicView = (await publicResponse.json()) as { html: string };
+    expect(publicView.html).toContain('第一版');
+    const exportAttempt = await call('GET', ['view', token, 'export']);
+    expect(exportAttempt.status).toBe(403);
     sqlite.close();
   });
 });
@@ -232,6 +296,18 @@ describe('visual editing', () => {
     expect(changed).toContain('<p>保留</p>');
     expect(() => patchElement(source, 'section', { text: '錯誤覆蓋' })).toThrow(/巢狀/);
     expect(iframeDocument(source, false)).toContain("connect-src 'none'");
+  });
+
+  it('inserts the editor bridge after the real body tag', () => {
+    const dom = new JSDOM('', { url: 'https://studio.example.org' });
+    vi.stubGlobal('DOMParser', dom.window.DOMParser);
+    vi.stubGlobal('window', dom.window);
+    const source = `<!doctype html><html><head></head><body><script>const marker = '</body>';</script><p data-editor-id="title">活動</p></body></html>`;
+    const preview = iframeDocument(source, true);
+    const parsed = new dom.window.DOMParser().parseFromString(preview, 'text/html');
+    expect(parsed.querySelectorAll('script')).toHaveLength(2);
+    expect(parsed.querySelector('script')?.textContent).toContain("'</body>'");
+    expect(parsed.body.lastElementChild?.tagName).toBe('SCRIPT');
   });
 });
 

@@ -23,7 +23,7 @@
 
 ## 驗證與限制
 
-本地靜態檢查：`npm run build`、`npm test`。Pages Functions 可用 `npx wrangler pages functions build functions` 檢查打包；不需要啟動開發伺服器。正式 OAuth、D1、R2、Drive、Google Groups 和 LLM 串接需在完成上述綁定後驗收。
+本地靜態檢查：`npm run build`、`npm test`。Pages Functions 可用 `npx wrangler pages functions build --compatibility-flags nodejs_compat` 檢查打包；不需要啟動開發伺服器。正式 OAuth、D1、R2、Drive、Google Groups 和 LLM 串接需在完成上述綁定後驗收。
 
 公開 magic link 的 HTML 必須送到檢視者瀏覽器才能呈現，因此持連結者可透過瀏覽器開發工具檢視頁面原始內容；平台只限制「下載交付檔」功能給工程師。分享頁的外部 iframe 由第三方服務提供，能否顯示仍受該服務自己的嵌入政策影響。Google Drive 分享網址不是穩定的官網 asset URL，因此交付檔保留原始連結並附工程整合註解。
 
