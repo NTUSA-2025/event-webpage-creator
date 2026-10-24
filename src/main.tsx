@@ -123,8 +123,9 @@ function App() {
     <div className="app-shell">
       <div className="utility-bar">
         <a href="#/dashboard" className="utility-brand">
-          <span className="utility-dot" /> 活動網頁設計台{' '}
-          <span className="utility-beta">DESIGN STUDIO</span>
+          <img src="/NTUSA_Logo_1.png" alt="" className="utility-logo" />
+          <span>活動網頁設計台</span>
+          <span className="utility-beta">NTUSA STUDIO</span>
         </a>
         <div className="utility-actions">
           {user?.isAdmin && (
@@ -266,21 +267,39 @@ function Dashboard({ user }: { user: User }) {
   return (
     <div className="dashboard page-wrap">
       <div className="dashboard-hero">
-        <div>
+        <div className="hero-copy">
           <div className="eyebrow">WORKSPACE / 我的活動</div>
           <h1>
             從一個想法
             <br />
-            開始設計活動頁。
+            <span>開始設計活動頁。</span>
           </h1>
           <p>歡迎回來，{user.name}。你可以繼續編輯草稿，或建立新的活動設計。</p>
+          <div className="hero-steps" aria-label="設計流程">
+            <span>寫下想法</span>
+            <ArrowRight size={15} />
+            <span>即時預覽</span>
+            <ArrowRight size={15} />
+            <span>分享設計</span>
+          </div>
         </div>
-        <div className="hero-mark">
-          <WandSparkles size={60} strokeWidth={1.1} />
+        <div className="hero-visual" aria-hidden="true">
+          <div className="hero-poster hero-poster-back" />
+          <div className="hero-poster hero-poster-front">
+            <span>NTUSA / EVENT STUDIO</span>
+            <WandSparkles size={40} strokeWidth={1.5} />
+            <strong>
+              讓靈感
+              <br />
+              登場。
+            </strong>
+            <span>CREATE · PREVIEW · SHARE</span>
+          </div>
+          <span className="hero-sticker">IDEA → PAGE</span>
         </div>
       </div>
       <section className="new-project">
-        <div>
+        <div className="new-project-intro">
           <span className="section-kicker">01 / NEW PROJECT</span>
           <h2>建立新活動</h2>
           <p>先輸入活動名稱，接著告訴 AI 你的內容與風格。</p>
@@ -317,8 +336,13 @@ function Dashboard({ user }: { user: User }) {
           <div className="project-grid">
             {projects.map((p) => (
               <button className="project-card" key={p.id} onClick={() => go(`edit/${p.id}`)}>
-                <span className="project-icon">
-                  <Code2 size={25} />
+                <span className="project-card-top">
+                  <span className="project-icon">
+                    <WandSparkles size={23} />
+                  </span>
+                  <span className="project-open">
+                    開啟設計 <ArrowRight size={15} />
+                  </span>
                 </span>
                 <span className="project-card-title">{p.title}</span>
                 <span className="project-card-meta">
@@ -331,14 +355,17 @@ function Dashboard({ user }: { user: User }) {
                   )}{' '}
                   · 更新於 {formatDate(p.updatedAt)}
                 </span>
-                <span className="project-card-arrow">
-                  <ArrowRight size={19} />
-                </span>
               </button>
             ))}
           </div>
         ) : !error ? (
-          <div className="empty-state">還沒有活動設計稿。從上方建立第一個活動吧。</div>
+          <div className="empty-state first-project">
+            <span className="first-project-icon">
+              <WandSparkles size={25} />
+            </span>
+            <strong>你的第一個活動，從這裡開始。</strong>
+            <p>在上方輸入活動名稱，就能開始和設計助手一起製作網頁。</p>
+          </div>
         ) : null}
       </section>
     </div>
@@ -793,24 +820,36 @@ function Editor({
           {panel === 'chat' ? (
             <>
               <div className="chat-scroll" ref={chatScroll}>
-                <div className="assistant-intro">
-                  <span className="sparkle-mark">
-                    <WandSparkles size={21} />
-                  </span>
-                  <strong>設計助手</strong>
-                  <p>
-                    描述活動的內容、目標受眾、視覺風格或想調整的區塊。我會產生可交給工程師的 HTML。
-                  </p>
-                </div>
+                {!detail.chat.length && (
+                  <div className="assistant-intro">
+                    <div className="assistant-intro-head">
+                      <span className="sparkle-mark">
+                        <WandSparkles size={21} />
+                      </span>
+                      <span>
+                        <small>AI CREATIVE PARTNER</small>
+                        <strong>設計助手</strong>
+                      </span>
+                    </div>
+                    <p>
+                      描述活動的內容、目標受眾、視覺風格或想調整的區塊。我會產生可交給工程師的
+                      HTML。
+                    </p>
+                  </div>
+                )}
                 {detail.chat.map((m) => (
                   <div className={`chat-bubble ${m.role}`} key={m.id}>
+                    <span className="chat-role">{m.role === 'user' ? '你' : '設計助手'}</span>
                     {m.content}
                     <small>{formatDate(m.created_at)}</small>
                   </div>
                 ))}
                 {busy === 'ai' && (
                   <>
-                    <div className="chat-bubble user pending">{pendingPrompt}</div>
+                    <div className="chat-bubble user pending">
+                      <span className="chat-role">你</span>
+                      {pendingPrompt}
+                    </div>
                     <div className="chat-progress">
                       <LoaderCircle size={18} className="spin" aria-hidden="true" />
                       <div>
@@ -833,14 +872,6 @@ function Editor({
                 )}
               </div>
               <div className="prompt-box">
-                <label htmlFor="media-links">Google Drive 圖片連結（每行一個，最多四個）</label>
-                <textarea
-                  id="media-links"
-                  className="media-input"
-                  value={mediaInput}
-                  onChange={(e) => setMediaInput(e.target.value)}
-                  placeholder="https://drive.google.com/file/d/.../view"
-                />
                 <label htmlFor="prompt">描述要生成或修改的內容</label>
                 <textarea
                   id="prompt"
@@ -848,6 +879,19 @@ function Editor({
                   onChange={(e) => setPrompt(e.target.value)}
                   placeholder="例如：把首屏改成深藍色，加入活動議程與講者介紹…"
                 />
+                <details className="media-details">
+                  <summary>
+                    <Plus size={15} /> 加入 Google Drive 圖片 <span>選填 · 最多 4 張</span>
+                  </summary>
+                  <label htmlFor="media-links">圖片分享連結（每行一個）</label>
+                  <textarea
+                    id="media-links"
+                    className="media-input"
+                    value={mediaInput}
+                    onChange={(e) => setMediaInput(e.target.value)}
+                    placeholder="https://drive.google.com/file/d/.../view"
+                  />
+                </details>
                 <button
                   className="primary-button send-button"
                   disabled={!!busy || !prompt.trim()}
@@ -862,7 +906,7 @@ function Editor({
                         : '生成中…'
                     : '送出修改'}
                 </button>
-                <small>單次最多 4 張圖片；目前限制每日 30 次 AI 修改。</small>
+                <small>每日可使用 30 次 AI 修改。生成後仍可在預覽中直接調整。</small>
               </div>
             </>
           ) : (
@@ -930,14 +974,18 @@ function Editor({
         </aside>
         <section className="preview-pane" id="editor-preview">
           <div className="pane-heading">
-            <div>
-              <Eye size={17} /> 即時預覽
+            <div className="preview-heading-title">
+              <Eye size={17} />
+              <span>即時預覽</span>
+              <small>與官網導覽列及頁尾一起檢視</small>
             </div>
             <div className="preview-controls">
               <button
                 className={device === 'desktop' ? 'active' : ''}
                 onClick={() => setDevice('desktop')}
                 title="桌面"
+                aria-label="桌面預覽"
+                aria-pressed={device === 'desktop'}
               >
                 <Monitor size={17} />
               </button>
@@ -945,11 +993,17 @@ function Editor({
                 className={device === 'mobile' ? 'active' : ''}
                 onClick={() => setDevice('mobile')}
                 title="手機"
+                aria-label="手機預覽"
+                aria-pressed={device === 'mobile'}
               >
                 <Smartphone size={17} />
               </button>
               <span className="control-divider" />
-              <button className={editMode ? 'active' : ''} onClick={() => setEditMode(!editMode)}>
+              <button
+                className={editMode ? 'active' : ''}
+                onClick={() => setEditMode(!editMode)}
+                aria-pressed={editMode}
+              >
                 {editMode ? (
                   <>
                     <Grip size={15} /> 編輯
@@ -1254,7 +1308,8 @@ function AdminPanel() {
                 <option value="google">Google（Gemini）</option>
               </select>
             </label>
-            <p>
+            <p className={`api-key-status ${llmKeys[llm.provider] ? 'ready' : 'missing'}`}>
+              <span className="status-dot" />
               {llmKeys[llm.provider]
                 ? '此供應商的 API key 已設定。'
                 : '此供應商的 API key 尚未設定。'}
