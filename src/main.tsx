@@ -380,11 +380,20 @@ function Editor({
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const frame = useRef<HTMLIFrameElement>(null);
+  const previewScroll = useRef(0);
   const codeEditor = useRef<HTMLTextAreaElement>(null);
   const codeClose = useRef<HTMLButtonElement>(null);
   const sourceRef = useRef(source);
+  const renderedRef = useRef(rendered);
+  const syncedSource = useRef('');
   sourceRef.current = source;
   const dirty = !!detail && source !== detail.html;
+
+  const updateRendered = useCallback((html: string, matchingSource: string) => {
+    renderedRef.current = html;
+    syncedSource.current = matchingSource;
+    setRendered(html);
+  }, []);
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
@@ -422,8 +431,8 @@ function Editor({
     const data = await api<ProjectDetail>(`projects/${id}`);
     setDetail(data);
     setSource(data.html);
-    setRendered(data.previewHtml);
-  }, [id]);
+    updateRendered(data.previewHtml, data.html);
+  }, [id, updateRendered]);
   useEffect(() => {
     reload().catch((e) => setError(err(e)));
   }, [reload]);
@@ -433,20 +442,37 @@ function Editor({
       .catch((e) => setChromeError(`官網導覽列與頁尾載入失敗：${err(e)}`));
   }, []);
   useEffect(() => {
-    if (!detail || source === detail.html) return;
+    if (!detail || source === syncedSource.current) return;
     const timer = window.setTimeout(() => {
       api<{ previewHtml: string }>(`projects/${id}/preview`, {
         method: 'POST',
         body: JSON.stringify({ html: source }),
       })
         .then((r) => {
-          if (sourceRef.current === source) setRendered(r.previewHtml);
+          if (sourceRef.current === source) updateRendered(r.previewHtml, source);
         })
         .catch((e) => setError(`預覽：${err(e)}`));
     }, 650);
     return () => clearTimeout(timer);
-  }, [source, detail, id]);
+  }, [source, detail, id, updateRendered]);
   useEffect(() => {
+    const applyVisualPatch = (
+      id: string,
+      patch: { dx?: number; dy?: number; width?: string; height?: string },
+    ) => {
+      const current = sourceRef.current;
+      const next = patchElement(current, id, patch);
+      if (current === syncedSource.current) {
+        try {
+          renderedRef.current = patchElement(renderedRef.current, id, patch);
+          syncedSource.current = next;
+        } catch {
+          // Let the regular preview request rebuild documents without editor markers.
+        }
+      }
+      sourceRef.current = next;
+      setSource(next);
+    };
     const onMessage = (
       event: MessageEvent<EditorMessage | { channel: 'event-page-chrome'; locale: 'zh' | 'en' }>,
     ) => {
@@ -457,6 +483,15 @@ function Editor({
         return;
       }
       if (message?.channel !== 'event-page-editor') return;
+      if (message.type === 'scroll') {
+        if (
+          typeof message.scrollY === 'number' &&
+          Number.isFinite(message.scrollY) &&
+          message.scrollY >= 0
+        )
+          previewScroll.current = message.scrollY;
+        return;
+      }
       if (!message.id || message.id.length > 200) return;
       if (message.type === 'select') setSelected(message);
       if (message.type === 'text' && message.leaf === true && typeof message.text === 'string') {
@@ -469,9 +504,7 @@ function Editor({
       }
       if (message.type === 'drag' && Number.isFinite(message.dx) && Number.isFinite(message.dy)) {
         try {
-          setSource((current) =>
-            patchElement(current, message.id, { dx: message.dx, dy: message.dy }),
-          );
+          applyVisualPatch(message.id, { dx: message.dx, dy: message.dy });
           setNotice('位置已更新，記得儲存草稿。');
         } catch (e) {
           setError(err(e));
@@ -483,9 +516,7 @@ function Editor({
         typeof message.height === 'string'
       ) {
         try {
-          setSource((current) =>
-            patchElement(current, message.id, { width: message.width, height: message.height }),
-          );
+          applyVisualPatch(message.id, { width: message.width, height: message.height });
           setNotice('尺寸已更新，記得儲存草稿。');
         } catch (e) {
           setError(err(e));
@@ -505,7 +536,7 @@ function Editor({
         body: JSON.stringify({ html, expectedRevisionId: detail.project.currentRevisionId }),
       },
     );
-    setRendered(data.previewHtml);
+    updateRendered(data.previewHtml, html);
     await reload();
     return data.revisionId;
   };
@@ -541,7 +572,7 @@ function Editor({
         },
       );
       setSource(result.html);
-      setRendered(result.previewHtml);
+      updateRendered(result.previewHtml, result.html);
       setPrompt('');
       setMediaInput('');
       setSelected(null);
@@ -631,7 +662,8 @@ function Editor({
   };
 
   const previewDocument = useMemo(
-    () => iframeDocument(rendered, editMode, chrome, locale),
+    () =>
+      iframeDocument(renderedRef.current, editMode, chrome, locale, previewScroll.current, true),
     [rendered, editMode, chrome, locale],
   );
   if (!detail)

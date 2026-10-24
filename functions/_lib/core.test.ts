@@ -309,6 +309,78 @@ describe('visual editing', () => {
     expect(parsed.querySelector('script')?.textContent).toContain("'</body>'");
     expect(parsed.body.lastElementChild?.tagName).toBe('SCRIPT');
   });
+
+  it('moves the element during dragging and commits the same offset on release', () => {
+    const parser = new JSDOM('', { url: 'https://studio.example.org' });
+    vi.stubGlobal('DOMParser', parser.window.DOMParser);
+    vi.stubGlobal('window', parser.window);
+    const source = '<!doctype html><html><body><h1 data-editor-id="title">活動</h1></body></html>';
+    const messages = vi.fn();
+    const dom = new JSDOM(iframeDocument(source, true), {
+      url: 'https://studio.example.org',
+      runScripts: 'dangerously',
+      beforeParse: (window) => {
+        window.postMessage = messages;
+      },
+    });
+    const element = dom.window.document.querySelector<HTMLElement>('[data-editor-id="title"]')!;
+    const pointer = (type: string, x: number, y: number) =>
+      new dom.window.MouseEvent(type, { bubbles: true, button: 0, clientX: x, clientY: y });
+
+    element.dispatchEvent(pointer('pointerdown', 10, 20));
+    element.dispatchEvent(pointer('pointermove', 30, 35));
+    expect(element.style.translate).toBe('20px 15px');
+    element.dispatchEvent(pointer('pointerup', 30, 35));
+    const drag = messages.mock.calls
+      .map(([message]) => message)
+      .find((message) => message.type === 'drag');
+    expect(drag).toMatchObject({ id: 'title', dx: 20, dy: 15 });
+    const firstSource = patchElement(source, drag.id, { dx: drag.dx, dy: drag.dy });
+    expect(firstSource).toContain('translate: 20px 15px');
+
+    element.dispatchEvent(pointer('pointerdown', 30, 35));
+    element.dispatchEvent(pointer('pointermove', 35, 30));
+    expect(element.style.translate).toBe('25px 10px');
+    element.dispatchEvent(pointer('pointerup', 35, 30));
+    expect(patchElement(firstSource, 'title', { dx: 5, dy: -5 })).toContain('translate: 25px 10px');
+
+    element.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 50 }) as DOMRect;
+    const handle = dom.window.document.body.querySelector<HTMLElement>('div > div')!;
+    handle.dispatchEvent(pointer('pointerdown', 100, 50));
+    handle.dispatchEvent(pointer('pointermove', 120, 60));
+    expect(element.style.width).toBe('120px');
+    expect(element.style.height).toBe('60px');
+    handle.dispatchEvent(pointer('pointerup', 120, 60));
+    expect(messages.mock.calls.map(([message]) => message)).toContainEqual(
+      expect.objectContaining({ type: 'resize', width: '120px', height: '60px' }),
+    );
+  });
+
+  it('restores the iframe scroll position after a preview refresh', () => {
+    const parser = new JSDOM('', { url: 'https://studio.example.org' });
+    vi.stubGlobal('DOMParser', parser.window.DOMParser);
+    vi.stubGlobal('window', parser.window);
+    const messages = vi.fn();
+    const scrollTo = vi.fn();
+    const dom = new JSDOM(
+      iframeDocument('<html><body><div>活動</div></body></html>', true, null, 'zh', 420, true),
+      {
+        url: 'https://studio.example.org',
+        runScripts: 'dangerously',
+        pretendToBeVisual: true,
+        beforeParse: (window) => {
+          window.postMessage = messages;
+          window.scrollTo = scrollTo;
+        },
+      },
+    );
+    expect(scrollTo).toHaveBeenCalledWith({ top: 420, behavior: 'instant' });
+    dom.window.dispatchEvent(new dom.window.Event('scroll'));
+    expect(messages).toHaveBeenCalledWith(
+      { channel: 'event-page-editor', type: 'scroll', id: '', scrollY: 0 },
+      '*',
+    );
+  });
 });
 
 describe('live official chrome', () => {

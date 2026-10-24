@@ -1,6 +1,8 @@
+import type { ChromeSnapshot } from './api';
+
 export interface EditorMessage {
   channel: 'event-page-editor';
-  type: 'select' | 'text' | 'drag' | 'resize';
+  type: 'select' | 'text' | 'drag' | 'resize' | 'scroll';
   id: string;
   tag?: string;
   text?: string;
@@ -10,6 +12,7 @@ export interface EditorMessage {
   dy?: number;
   width?: string;
   height?: string;
+  scrollY?: number;
 }
 
 const bridge = `
@@ -17,6 +20,9 @@ const bridge = `
   const send = (type, element, more = {}) => parent.postMessage({ channel: 'event-page-editor', type, id: element.getAttribute('data-editor-id'), tag: element.tagName.toLowerCase(), leaf: element.children.length === 0, text: element.textContent?.trim().slice(0, 500) || '', src: element.getAttribute('src') || '', ...more }, '*');
   const editable = (target) => target?.closest?.('[data-editor-id]');
   let drag;
+  const style = document.createElement('style');
+  style.textContent = '[data-editor-id]{touch-action:none}';
+  document.head.appendChild(style);
   const frame = document.createElement('div');
   frame.style.cssText = 'position:fixed;pointer-events:none;border:2px solid #58a7b8;z-index:2147483647;display:none;box-sizing:border-box';
   const handle = document.createElement('div');
@@ -24,35 +30,75 @@ const bridge = `
   frame.appendChild(handle); document.body.appendChild(frame);
   let selected;
   const place = () => { if (!selected) return; const r = selected.getBoundingClientRect(); frame.style.left = r.left + 'px'; frame.style.top = r.top + 'px'; frame.style.width = r.width + 'px'; frame.style.height = r.height + 'px'; frame.style.display = 'block'; };
+  const startDrag = (event, element, resize) => {
+    const rect = element.getBoundingClientRect();
+    const translate = element.style.translate.match(/(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px/);
+    drag = {
+      element, pointerId: event.pointerId, x: event.clientX, y: event.clientY, resize,
+      left: rect.left, top: rect.top, width: rect.width, height: rect.height,
+      translateX: translate ? Number(translate[1]) : 0,
+      translateY: translate ? Number(translate[2]) : 0,
+      originalTranslate: element.style.translate,
+      originalWidth: element.style.width, originalHeight: element.style.height,
+    };
+    event.target.setPointerCapture?.(event.pointerId);
+  };
   handle.addEventListener('pointerdown', (event) => {
-    if (!selected) return;
+    if (!selected || event.button !== 0) return;
     event.preventDefault(); event.stopPropagation();
-    const r = selected.getBoundingClientRect();
-    drag = { element: selected, x: event.clientX, y: event.clientY, resize: true, width: r.width, height: r.height };
+    startDrag(event, selected, true);
   });
   document.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
     const element = editable(event.target);
     if (!element) return;
     event.preventDefault();
     event.stopPropagation();
     selected = element; place();
     send('select', element);
-    drag = { element, x: event.clientX, y: event.clientY };
+    startDrag(event, element, false);
   }, true);
   document.addEventListener('pointermove', (event) => {
-    if (!drag) return;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    event.preventDefault();
+    const dx = Math.round(event.clientX - drag.x), dy = Math.round(event.clientY - drag.y);
     if (drag.resize) {
-      frame.style.width = Math.max(24, drag.width + event.clientX - drag.x) + 'px';
-      frame.style.height = Math.max(24, drag.height + event.clientY - drag.y) + 'px';
+      const width = Math.max(24, Math.round(drag.width + dx)) + 'px';
+      const height = Math.max(24, Math.round(drag.height + dy)) + 'px';
+      drag.element.style.width = width;
+      drag.element.style.height = height;
+      frame.style.width = width;
+      frame.style.height = height;
+    } else {
+      drag.element.style.translate = (drag.translateX + dx) + 'px ' + (drag.translateY + dy) + 'px';
+      frame.style.left = drag.left + dx + 'px';
+      frame.style.top = drag.top + dy + 'px';
     }
   }, true);
-  document.addEventListener('pointerup', (event) => {
-    if (!drag) return;
+  const finishDrag = (event, cancelled) => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
     const dx = Math.round(event.clientX - drag.x), dy = Math.round(event.clientY - drag.y);
-    if (drag.resize && Math.abs(dx) + Math.abs(dy) > 4) send('resize', drag.element, { width: Math.max(24, Math.round(drag.width + dx)) + 'px', height: Math.max(24, Math.round(drag.height + dy)) + 'px' });
-    else if (Math.abs(dx) + Math.abs(dy) > 4) send('drag', drag.element, { dx, dy });
+    if (cancelled || Math.abs(dx) + Math.abs(dy) <= 4) {
+      drag.element.style.translate = drag.originalTranslate;
+      drag.element.style.width = drag.originalWidth;
+      drag.element.style.height = drag.originalHeight;
+    } else if (drag.resize) {
+      const width = Math.max(24, Math.round(drag.width + dx)) + 'px';
+      const height = Math.max(24, Math.round(drag.height + dy)) + 'px';
+      drag.element.style.width = width;
+      drag.element.style.height = height;
+      send('resize', drag.element, { width, height });
+    } else {
+      drag.element.style.translate = (drag.translateX + dx) + 'px ' + (drag.translateY + dy) + 'px';
+      send('drag', drag.element, { dx, dy });
+    }
     drag = null;
-  }, true);
+    place();
+  };
+  document.addEventListener('pointerup', (event) => finishDrag(event, false), true);
+  document.addEventListener('pointercancel', (event) => finishDrag(event, true), true);
+  addEventListener('scroll', () => { if (!drag) place(); }, { passive: true });
+  addEventListener('resize', () => { if (!drag) place(); });
   document.addEventListener('dblclick', (event) => {
     const element = editable(event.target);
     if (!element || element.matches('img, iframe, video') || element.children.length) return;
@@ -122,6 +168,8 @@ export function iframeDocument(
   editMode: boolean,
   chrome: ChromeSnapshot | null = null,
   locale: 'zh' | 'en' = 'zh',
+  initialScrollY = 0,
+  trackScroll = false,
 ): string {
   const document = new DOMParser().parseFromString(html, 'text/html');
   const csp = document.createElement('meta');
@@ -145,6 +193,22 @@ export function iframeDocument(
   if (editMode) {
     const script = document.createElement('script');
     script.textContent = bridge;
+    document.body.appendChild(script);
+  }
+  if (trackScroll) {
+    const script = document.createElement('script');
+    const y = Number.isFinite(initialScrollY) ? Math.max(0, Math.round(initialScrollY)) : 0;
+    script.textContent = `
+(() => {
+  const savedY = ${y};
+  const restore = () => scrollTo({ top: savedY, behavior: 'instant' });
+  addEventListener('scroll', () => parent.postMessage({ channel: 'event-page-editor', type: 'scroll', id: '', scrollY }, '*'), { passive: true });
+  if (savedY) {
+    restore();
+    requestAnimationFrame(restore);
+    addEventListener('load', restore, { once: true });
+  }
+})();`;
     document.body.appendChild(script);
   }
   return `<!doctype html>\n${document.documentElement.outerHTML}`;
@@ -175,4 +239,3 @@ export function patchElement(
   if (patch.height !== undefined) element.style.height = patch.height;
   return `<!doctype html>\n${document.documentElement.outerHTML}`;
 }
-import type { ChromeSnapshot } from './api';
