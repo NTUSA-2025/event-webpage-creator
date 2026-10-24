@@ -9,7 +9,10 @@ export interface Env {
   ADMIN_GROUP_EMAIL: string;
   ENGINEER_GROUP_EMAIL: string;
   GOOGLE_DRIVE_API_KEY: string;
-  LLM_API_KEY: string;
+  OPENAI_API_KEY?: string;
+  ANTHROPIC_API_KEY?: string;
+  GOOGLE_GENERATIVE_AI_API_KEY?: string;
+  LLM_API_KEY?: string;
   SESSION_SECRET: string;
   PUBLIC_ORIGIN: string;
 }

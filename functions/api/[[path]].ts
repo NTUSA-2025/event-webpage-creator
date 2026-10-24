@@ -29,7 +29,13 @@ import {
 } from '../_lib/storage';
 import { fetchLiveChrome, liveChromeImage } from '../_lib/chrome';
 import { exportHtml, mediaResponse, previewHtml, validateSource } from '../_lib/media';
-import { generateHtml, llmSettings, validateLlmUrl } from '../_lib/llm';
+import {
+  generateHtml,
+  llmKeyStatus,
+  llmSettings,
+  validateLlmProvider,
+  validateLlmUrl,
+} from '../_lib/llm';
 
 function projectSummary(project: ProjectRow, token?: string) {
   return {
@@ -105,15 +111,21 @@ async function route(request: Request, env: Env, parts: string[]): Promise<Respo
       ).all();
       return json({
         llm: await llmSettings(env),
+        llmKeys: llmKeyStatus(env),
         rules: rules.results || [],
       });
     }
     if (method === 'PUT' && parts[1] === 'llm') {
       const body = await readJson(request);
-      const baseUrl = validateLlmUrl(stringField(body, 'baseUrl', 500));
+      const provider = validateLlmProvider(stringField(body, 'provider', 30));
+      const customUrl = stringField(body, 'baseUrl', 500).trim();
+      const baseUrl = customUrl ? validateLlmUrl(customUrl) : '';
       const model = stringField(body, 'model', 150).trim();
       if (!model) throw new HttpError(400, '請輸入模型名稱');
       await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO settings (key, value) VALUES ('llm_provider', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+        ).bind(provider),
         env.DB.prepare(
           "INSERT INTO settings (key, value) VALUES ('llm_base_url', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
         ).bind(baseUrl),
@@ -121,7 +133,7 @@ async function route(request: Request, env: Env, parts: string[]): Promise<Respo
           "INSERT INTO settings (key, value) VALUES ('llm_model', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
         ).bind(model),
       ]);
-      return json({ llm: { baseUrl, model } });
+      return json({ llm: { provider, baseUrl, model } });
     }
     if (method === 'POST' && parts[1] === 'rules') {
       const body = await readJson(request);

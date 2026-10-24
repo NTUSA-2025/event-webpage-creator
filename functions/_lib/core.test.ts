@@ -228,35 +228,81 @@ describe('draft and sharing flow', () => {
 describe('multimodal page generation', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('passes accessible Drive image bytes to the configured model and returns editable HTML', async () => {
-    const requests: Array<{ url: string; body?: string }> = [];
+  const html = '<!doctype html><html><body><h1>迎新活動</h1></body></html>';
+
+  it.each([
+    {
+      provider: 'openai',
+      keyName: 'OPENAI_API_KEY',
+      url: 'https://api.openai.com/v1/responses',
+      response: {
+        id: 'resp_1',
+        object: 'response',
+        created_at: 1,
+        model: 'test-model',
+        status: 'completed',
+        output: [
+          {
+            id: 'msg_1',
+            type: 'message',
+            role: 'assistant',
+            status: 'completed',
+            content: [{ type: 'output_text', text: html, annotations: [] }],
+          },
+        ],
+        usage: { input_tokens: 10, output_tokens: 20, total_tokens: 30 },
+      },
+      imageMarker: 'data:image/png;base64,',
+    },
+    {
+      provider: 'anthropic',
+      keyName: 'ANTHROPIC_API_KEY',
+      url: 'https://api.anthropic.com/v1/messages',
+      response: {
+        id: 'msg_1',
+        type: 'message',
+        role: 'assistant',
+        model: 'test-model',
+        content: [{ type: 'text', text: html }],
+        stop_reason: 'end_turn',
+        stop_sequence: null,
+        usage: { input_tokens: 10, output_tokens: 20 },
+      },
+      imageMarker: '"type":"image"',
+    },
+    {
+      provider: 'google',
+      keyName: 'GOOGLE_GENERATIVE_AI_API_KEY',
+      url: 'https://generativelanguage.googleapis.com/v1beta/models/test-model:generateContent',
+      response: {
+        candidates: [{ content: { role: 'model', parts: [{ text: html }] }, finishReason: 'STOP' }],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 },
+      },
+      imageMarker: '"inlineData"',
+    },
+  ])('passes Drive image bytes to $provider and returns editable HTML', async (scenario) => {
+    const requests: Array<{ url: string; body?: string; headers: Headers }> = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-        const url = String(input);
-        requests.push({ url, body: typeof init?.body === 'string' ? init.body : undefined });
+        const request = new Request(input, init);
+        const url = request.url;
+        requests.push({ url, body: await request.text(), headers: request.headers });
         if (url.includes('fields='))
           return Response.json({ mimeType: 'image/png', size: '4', name: 'poster.png' });
         if (url.includes('alt=media')) return new Response(new Uint8Array([137, 80, 78, 71]));
-        return Response.json({
-          choices: [
-            {
-              finish_reason: 'stop',
-              message: { content: '<!doctype html><html><body><h1>迎新活動</h1></body></html>' },
-            },
-          ],
-        });
+        return Response.json(scenario.response);
       }),
     );
     const env = {
-      LLM_API_KEY: 'test-key',
+      [scenario.keyName]: 'test-key',
       GOOGLE_DRIVE_API_KEY: 'drive-key',
       DB: {
         prepare: () => ({
           all: async () => ({
             results: [
-              { key: 'llm_base_url', value: 'https://llm.example.org/v1' },
-              { key: 'llm_model', value: 'vision-model' },
+              { key: 'llm_provider', value: scenario.provider },
+              { key: 'llm_model', value: 'test-model' },
             ],
           }),
         }),
@@ -269,9 +315,54 @@ describe('multimodal page generation', () => {
       ['https://drive.google.com/file/d/abcdef1234567890/view'],
     );
     expect(result).toContain('data-editor-id');
-    const modelRequest = requests.find((request) => request.url.endsWith('/chat/completions'));
-    expect(modelRequest?.body).toContain('data:image/png;base64,');
-    expect(modelRequest?.body).toContain('vision-model');
+    const modelRequest = requests.find((request) => request.url === scenario.url);
+    expect(modelRequest?.body).toContain(scenario.imageMarker);
+    expect(scenario.provider === 'google' ? modelRequest?.url : modelRequest?.body).toContain(
+      'test-model',
+    );
+    expect(modelRequest?.body).not.toContain('"temperature"');
+    if (scenario.provider === 'google')
+      expect(modelRequest?.headers.get('x-goog-api-key')).toBe('test-key');
+    else
+      expect(
+        modelRequest?.headers.get('authorization') || modelRequest?.headers.get('x-api-key'),
+      ).toContain('test-key');
+  });
+
+  it('keeps legacy OpenAI Chat Completions endpoints usable', async () => {
+    const requests: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const request = new Request(input, init);
+        requests.push(request.url);
+        return Response.json({
+          id: 'chatcmpl_1',
+          object: 'chat.completion',
+          created: 1,
+          model: 'vision-model',
+          choices: [
+            { index: 0, finish_reason: 'stop', message: { role: 'assistant', content: html } },
+          ],
+          usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+        });
+      }),
+    );
+    const env = {
+      LLM_API_KEY: 'old-key',
+      DB: {
+        prepare: () => ({
+          all: async () => ({
+            results: [
+              { key: 'llm_base_url', value: 'https://llm.example.org/v1' },
+              { key: 'llm_model', value: 'vision-model' },
+            ],
+          }),
+        }),
+      },
+    } as unknown as Env;
+    expect(await generateHtml(env, '更新頁面', html, [])).toContain('data-editor-id');
+    expect(requests).toContain('https://llm.example.org/v1/chat/completions');
   });
 });
 

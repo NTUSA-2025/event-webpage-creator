@@ -1157,8 +1157,15 @@ function ShareView({
 }
 
 type Rule = { id: string; kind: 'email' | 'domain' | 'group'; value: string };
+type LlmProvider = 'openai' | 'anthropic' | 'google';
+type LlmSettings = { provider: LlmProvider; baseUrl: string; model: string };
 function AdminPanel() {
-  const [llm, setLlm] = useState({ baseUrl: '', model: '' });
+  const [llm, setLlm] = useState<LlmSettings>({ provider: 'openai', baseUrl: '', model: '' });
+  const [llmKeys, setLlmKeys] = useState<Record<LlmProvider, boolean>>({
+    openai: false,
+    anthropic: false,
+    google: false,
+  });
   const [rules, setRules] = useState<Rule[]>([]);
   const [kind, setKind] = useState<Rule['kind']>('email');
   const [value, setValue] = useState('');
@@ -1166,9 +1173,10 @@ function AdminPanel() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   useEffect(() => {
-    api<{ llm: typeof llm; rules: Rule[] }>('admin')
+    api<{ llm: LlmSettings; llmKeys: Record<LlmProvider, boolean>; rules: Rule[] }>('admin')
       .then((r) => {
         setLlm(r.llm);
+        setLlmKeys(r.llmKeys);
         setRules(r.rules);
       })
       .catch((e) => setError(err(e)));
@@ -1231,16 +1239,33 @@ function AdminPanel() {
             <WandSparkles size={21} />
           </div>
           <h2>LLM API</h2>
-          <p>API key 儲存在 Cloudflare secret；此處設定相容 OpenAI 的服務網址與多模態模型。</p>
+          <p>選擇模型供應商與支援圖片輸入的模型。API key 儲存在 Cloudflare secret。</p>
           <form onSubmit={saveLlm}>
             <label>
-              Base URL
+              模型供應商
+              <select
+                value={llm.provider}
+                onChange={(e) =>
+                  setLlm({ provider: e.target.value as LlmProvider, baseUrl: '', model: '' })
+                }
+              >
+                <option value="openai">OpenAI（GPT）</option>
+                <option value="anthropic">Anthropic（Claude）</option>
+                <option value="google">Google（Gemini）</option>
+              </select>
+            </label>
+            <p>
+              {llmKeys[llm.provider]
+                ? '此供應商的 API key 已設定。'
+                : '此供應商的 API key 尚未設定。'}
+            </p>
+            <label>
+              自訂 Base URL（選填）
               <input
                 type="url"
                 value={llm.baseUrl}
                 onChange={(e) => setLlm({ ...llm, baseUrl: e.target.value })}
-                placeholder="https://api.example.com/v1"
-                required
+                placeholder="留空使用供應商官方 API"
               />
             </label>
             <label>

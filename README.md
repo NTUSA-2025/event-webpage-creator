@@ -15,11 +15,11 @@
 1. 建立 Pages 專案，建置指令設為 `npm run build`，輸出目錄設為 `dist`。Functions 目錄維持 repo 根目錄的 `functions/`。
 2. 在 Pages 專案設定中，將 D1 database 綁定為 `DB`，私有 R2 bucket 綁定為 `FILES`；設定兼容日期 `2026-10-01`，並啟用 `nodejs_compat`。本 repo 不放 `wrangler.toml`，由 Pages dashboard 管理綁定，避免部署時覆蓋 dashboard 設定。[Cloudflare Pages 設定文件](https://developers.cloudflare.com/pages/functions/wrangler-configuration/)。
 3. 在 D1 執行 `migrations/0001_init.sql`。部署前須先完成 migration；專案不會自動修改正式資料庫。
-4. 依 `.dev.vars.example` 在 Pages 的 Variables and Secrets 建立環境變數。`GOOGLE_CLIENT_SECRET`、`GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`、`GOOGLE_DRIVE_API_KEY`、`LLM_API_KEY`、`SESSION_SECRET` 須設為加密 secret；`SESSION_SECRET` 至少 32 字元。`PUBLIC_ORIGIN` 必須是實際部署來源，例如 `https://your-project.pages.dev`，不加尾端 `/`。
+4. 依 `.dev.vars.example` 在 Pages 的 Variables and Secrets 建立環境變數。`GOOGLE_CLIENT_SECRET`、`GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`、`GOOGLE_DRIVE_API_KEY`、`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GOOGLE_GENERATIVE_AI_API_KEY`、`SESSION_SECRET` 中實際使用的金鑰須設為加密 secret；`SESSION_SECRET` 至少 32 字元。`PUBLIC_ORIGIN` 必須是實際部署來源，例如 `https://your-project.pages.dev`，不加尾端 `/`。
 5. Google OAuth Web application 的授權重新導向 URI 設為 `<PUBLIC_ORIGIN>/api/auth/callback`，登入範圍為 `openid email profile`。授權建立者可來自任何 Google 帳號，但實際建立資格由平台規則控制。
 6. 啟用 Google Admin SDK Directory API，讓 Workspace 超級管理員替服務帳號開啟網域委派，授予 `https://www.googleapis.com/auth/admin.directory.group.member.readonly`。`GOOGLE_WORKSPACE_ADMIN_EMAIL` 是被委派的管理員信箱；`ADMIN_GROUP_EMAIL` 與 `ENGINEER_GROUP_EMAIL` 分別設定兩個 Google Group。群組驗證失敗時，受保護操作會拒絕存取。[Google 群組成員查詢](https://developers.google.com/workspace/admin/directory/reference/rest/v1/members/hasMember)。
 7. 啟用 Google Drive API，建立受 API 範圍限制的 key。素材須是 Drive 的 PNG、JPEG、WebP 或 GIF，設為「知道連結的任何人可檢視」，單檔不超過 8 MB；若連結含 resource key，平台會帶入 Drive API 請求。[Drive 公開檔案憑證](https://developers.google.com/workspace/guides/create-credentials)、[resource key](https://developers.google.com/workspace/drive/api/guides/resource-keys)。
-8. 第一次以管理員群組帳號登入後，在後台設定 LLM HTTPS base URL 與支援圖片輸入的模型。`LLM_API_KEY` 保持在 Cloudflare secret；平台以相容 OpenAI Chat Completions 的 `POST /chat/completions` 呼叫模型。管理員也可加入建立者信箱、網域或 Google Group。預覽中的中英文 nav/footer 每次載入時直接從官網抓取，不需手動同步。
+8. 第一次以管理員群組帳號登入後，在後台選擇 OpenAI、Anthropic 或 Google，並填入支援圖片輸入的模型 ID。Base URL 留空時，平台透過 AI SDK 直接呼叫該供應商的官方 API；如使用自訂 HTTPS Base URL，該端點須支援所選供應商的 API 格式（OpenAI 自訂端點使用 Chat Completions 格式）。供應商金鑰只存於 Cloudflare secret；舊版 `LLM_API_KEY` 仍可作為 OpenAI 金鑰使用。管理員也可加入建立者信箱、網域或 Google Group。預覽中的中英文 nav/footer 每次載入時直接從官網抓取，不需手動同步。
 
 ## 本機環境變數
 
