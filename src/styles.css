@@ -602,12 +602,44 @@ a {
   background: #dcecef;
   margin-left: 17px;
 }
+.chat-bubble.pending {
+  border: 1px solid #bfdee4;
+}
 .chat-bubble small {
   display: block;
   text-align: right;
   margin-top: 8px;
   color: #9a9fa1;
   font-size: 10px;
+}
+.chat-progress {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 14px;
+  margin-bottom: 10px;
+  border: 1px solid #dce9e7;
+  border-radius: 12px;
+  background: #f1f7f6;
+  color: #4e8790;
+}
+.chat-progress > svg {
+  flex: none;
+  margin-top: 2px;
+}
+.chat-progress strong {
+  font-size: 12px;
+}
+.chat-progress p {
+  margin: 5px 0;
+  color: #62777c;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.chat-progress small {
+  color: #75898c;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
 .prompt-box {
   flex: none;

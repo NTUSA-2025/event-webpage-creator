@@ -377,9 +377,14 @@ function Editor({
   const [panel, setPanel] = useState<'chat' | 'history'>('chat');
   const [codeOpen, setCodeOpen] = useState(false);
   const [busy, setBusy] = useState<'save' | 'ai' | 'share' | 'restore' | ''>('');
+  const [aiPhase, setAiPhase] = useState<'saving' | 'generating' | 'refreshing' | ''>('');
+  const [aiElapsed, setAiElapsed] = useState(0);
+  const [pendingPrompt, setPendingPrompt] = useState('');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const frame = useRef<HTMLIFrameElement>(null);
+  const chatScroll = useRef<HTMLDivElement>(null);
+  const aiStartedAt = useRef(0);
   const previewScroll = useRef(0);
   const codeEditor = useRef<HTMLTextAreaElement>(null);
   const codeClose = useRef<HTMLButtonElement>(null);
@@ -397,6 +402,17 @@ function Editor({
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
+  useEffect(() => {
+    if (busy !== 'ai') return;
+    const timer = window.setInterval(() => {
+      setAiElapsed(Math.floor((Date.now() - aiStartedAt.current) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [busy]);
+  useEffect(() => {
+    if (panel === 'chat' && (busy === 'ai' || detail?.chat.length))
+      chatScroll.current?.scrollTo({ top: chatScroll.current.scrollHeight, behavior: 'smooth' });
+  }, [busy, aiPhase, panel, detail?.chat.length]);
   useEffect(() => {
     if (!codeOpen) return;
     const previousFocus = document.activeElement as HTMLElement | null;
@@ -554,12 +570,18 @@ function Editor({
   };
   const generate = async () => {
     if (!detail || !prompt.trim()) return;
+    const requestPrompt = prompt.trim();
+    aiStartedAt.current = Date.now();
+    setAiElapsed(0);
+    setPendingPrompt(requestPrompt);
+    setAiPhase(source !== detail.html ? 'saving' : 'generating');
     setBusy('ai');
     setError('');
     setNotice('');
     try {
       let expected = detail.project.currentRevisionId;
       if (source !== detail.html) expected = await save();
+      setAiPhase('generating');
       const mediaLinks = mediaInput
         .split('\n')
         .map((s) => s.trim())
@@ -568,9 +590,10 @@ function Editor({
         `projects/${id}/ai`,
         {
           method: 'POST',
-          body: JSON.stringify({ prompt: prompt.trim(), mediaLinks, expectedRevisionId: expected }),
+          body: JSON.stringify({ prompt: requestPrompt, mediaLinks, expectedRevisionId: expected }),
         },
       );
+      setAiPhase('refreshing');
       setSource(result.html);
       updateRendered(result.previewHtml, result.html);
       setPrompt('');
@@ -582,6 +605,8 @@ function Editor({
       setError(err(e));
     } finally {
       setBusy('');
+      setAiPhase('');
+      setPendingPrompt('');
     }
   };
   const share = async (rotate = false) => {
@@ -767,7 +792,7 @@ function Editor({
           </div>
           {panel === 'chat' ? (
             <>
-              <div className="chat-scroll">
+              <div className="chat-scroll" ref={chatScroll}>
                 <div className="assistant-intro">
                   <span className="sparkle-mark">
                     <WandSparkles size={21} />
@@ -783,6 +808,29 @@ function Editor({
                     <small>{formatDate(m.created_at)}</small>
                   </div>
                 ))}
+                {busy === 'ai' && (
+                  <>
+                    <div className="chat-bubble user pending">{pendingPrompt}</div>
+                    <div className="chat-progress">
+                      <LoaderCircle size={18} className="spin" aria-hidden="true" />
+                      <div>
+                        <strong role="status" aria-live="polite">
+                          {aiPhase === 'saving'
+                            ? '正在儲存目前草稿'
+                            : aiPhase === 'refreshing'
+                              ? '正在更新預覽與對話'
+                              : '正在處理請求並等待模型回覆'}
+                        </strong>
+                        <p>
+                          {aiPhase === 'generating'
+                            ? '生成完整活動頁可能需要一些時間，完成後會自動顯示預覽。'
+                            : '請保持頁面開啟，完成後會自動更新。'}
+                        </p>
+                        <small aria-hidden="true">已等待 {aiElapsed} 秒</small>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
               <div className="prompt-box">
                 <label htmlFor="media-links">Google Drive 圖片連結（每行一個，最多四個）</label>
@@ -806,7 +854,13 @@ function Editor({
                   onClick={generate}
                 >
                   {busy === 'ai' ? <LoaderCircle size={17} className="spin" /> : <Send size={17} />}{' '}
-                  送出修改
+                  {busy === 'ai'
+                    ? aiPhase === 'saving'
+                      ? '儲存中…'
+                      : aiPhase === 'refreshing'
+                        ? '更新中…'
+                        : '生成中…'
+                    : '送出修改'}
                 </button>
                 <small>單次最多 4 張圖片；目前限制每日 30 次 AI 修改。</small>
               </div>
